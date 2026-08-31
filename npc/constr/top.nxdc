@@ -1,0 +1,6 @@
+top=top
+
+# Two switches control one LED through the XOR in vsrc/top.v.
+a SW0
+b SW1
+f LD0
