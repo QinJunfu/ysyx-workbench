@@ -26,8 +26,11 @@ $(REPO_MAKEFILE):
 	sed -i -e 's/-g -O2/-O2/' $@
 
 SPIKE = $(REPO_BUILD_PATH)/spike
-$(SPIKE): $(REPO_MAKEFILE)
-	CFLAGS="-fvisibility=hidden" CXXFLAGS="-fvisibility=hidden" $(MAKE) -C $(^D)
+.PHONY: FORCE
+FORCE:
+
+$(SPIKE): $(REPO_MAKEFILE) FORCE
+	CFLAGS="-fvisibility=hidden" CXXFLAGS="-fvisibility=hidden" $(MAKE) -C $(REPO_BUILD_PATH) spike
 
 BUILD_DIR = ./build
 $(shell mkdir -p $(BUILD_DIR))
@@ -42,8 +45,9 @@ NAME = $(GUEST_ISA)-spike-so
 BINARY = $(BUILD_DIR)/$(NAME)
 SRCS = difftest.cc
 
+# GCC 16 warns about an attribute in Spike's FILE deleter type.
 $(BINARY): $(SPIKE) $(SRCS)
-	g++ -std=c++17 -O2 -shared -fPIC -fvisibility=hidden $(INC_PATH) $(SRCS) $(INC_LIBS) -o $@
+	g++ -std=c++17 -O2 -shared -fPIC -fvisibility=hidden -Wno-ignored-attributes $(INC_PATH) $(SRCS) $(INC_LIBS) -o $@
 
 clean:
 	rm -rf $(BUILD_DIR)
@@ -51,4 +55,4 @@ clean:
 all: $(BINARY)
 .DEFAULT_GOAL = all
 
-.PHONY: all clean $(SPIKE)
+.PHONY: all clean FORCE
