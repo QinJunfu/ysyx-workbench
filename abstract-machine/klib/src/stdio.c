@@ -10,12 +10,68 @@ int vprintf(const char *fmt, va_list ap) {
   panic("Not implemented");
 }
 
+static char *write_decimal(char *out, int value) {
+  unsigned int magnitude;
+  char digits[sizeof(unsigned int) * 3];
+  int count = 0;
+
+  if (value < 0) {
+    *out++ = '-';
+    magnitude = 0u - (unsigned int)value;
+  } else {
+    magnitude = (unsigned int)value;
+  }
+
+  do {
+    digits[count++] = '0' + magnitude % 10;
+    magnitude /= 10;
+  } while (magnitude != 0);
+
+  while (count > 0) {
+    *out++ = digits[--count];
+  }
+  return out;
+}
+
 int vsprintf(char *out, const char *fmt, va_list ap) {
-  panic("Not implemented");
+  char *start = out;
+
+  while (*fmt != '\0') {
+    if (*fmt != '%') {
+      *out++ = *fmt++;
+      continue;
+    }
+
+    fmt++;
+    switch (*fmt++) {
+      case '%':
+        *out++ = '%';
+        break;
+      case 's': {
+        const char *str = va_arg(ap, const char *);
+        while (*str != '\0') {
+          *out++ = *str++;
+        }
+        break;
+      }
+      case 'd':
+        out = write_decimal(out, va_arg(ap, int));
+        break;
+      default:
+        panic("Unsupported conversion specifier");
+    }
+  }
+
+  *out = '\0';
+  return out - start;
 }
 
 int sprintf(char *out, const char *fmt, ...) {
-  panic("Not implemented");
+  va_list ap;
+  va_start(ap, fmt);
+  int result = vsprintf(out, fmt, ap);
+  va_end(ap);
+  return result;
 }
 
 int snprintf(char *out, size_t n, const char *fmt, ...) {
