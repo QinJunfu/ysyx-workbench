@@ -9,11 +9,20 @@
 !*.sv
 !*.cpp
 !*.cc
+!Kconfig
+!configs/
+!configs/*_defconfig
 !.gitignore
 !.scalafmt.conf
 !README.md
 !scripts/build-nemu-ref.sh
+!scripts/config.mk
 build/
+
+.config
+.config.old
+include/config/
+include/generated/
 
 # mill
 !*.mill

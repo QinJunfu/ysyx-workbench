@@ -1,0 +1,5 @@
+# CONFIG_NPC_DIFFTEST is not set
+CONFIG_NPC_DIFFTEST_REF_PATH="../nemu/build/riscv32-nemu-interpreter-so"
+# CONFIG_NPC_ITRACE is not set
+# CONFIG_NPC_MTRACE is not set
+# CONFIG_NPC_FTRACE is not set

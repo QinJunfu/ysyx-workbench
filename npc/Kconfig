@@ -1,0 +1,30 @@
+mainmenu "NPC Configuration Menu"
+
+menu "NPC Debugging"
+
+config NPC_DIFFTEST
+	bool "Enable differential testing"
+	default n
+	help
+	  Compare each committed instruction with the configured NEMU reference.
+
+config NPC_DIFFTEST_REF_PATH
+	depends on NPC_DIFFTEST
+	string "DiffTest reference shared library"
+	default "../nemu/build/riscv32-nemu-interpreter-so"
+
+config NPC_ITRACE
+	bool "Enable instruction trace"
+	default n
+
+config NPC_MTRACE
+	bool "Enable memory trace"
+	default n
+
+config NPC_FTRACE
+	bool "Enable function trace"
+	default n
+	help
+	  Function tracing requires an ELF file at run time.
+
+endmenu

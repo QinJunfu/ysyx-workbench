@@ -16,3 +16,8 @@
 /nvboard
 /am-kernels
 /npc.backup
+
+/npc/.config
+/npc/.config.old
+/npc/include/config/
+/npc/include/generated/

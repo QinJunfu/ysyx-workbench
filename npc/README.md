@@ -17,7 +17,21 @@ ROOT=$PWD
 
 首次构建会生成 Chisel RTL 和 Verilator 仿真器；之后只会在相关源文件变更时重新构建。
 
-## 最快的冒烟测试
+## 配置
+
+NPC 的 DiffTest 和文本 trace 使用独立的 Kconfig 配置，不会修改 NEMU 的 `.config`：
+
+```bash
+make -C npc default_defconfig   # 使用默认配置（全部关闭）
+make -C npc menuconfig          # 交互式启用配置项
+```
+
+可配置项为 `CONFIG_NPC_DIFFTEST`、`CONFIG_NPC_DIFFTEST_REF_PATH`、
+`CONFIG_NPC_ITRACE`、`CONFIG_NPC_MTRACE` 和 `CONFIG_NPC_FTRACE`。配置文件保存在
+`npc/.config`，生成的头文件保存在 `npc/include/generated/autoconf.h`。首次执行
+`make`、`make sim` 或 `make run` 前必须先运行上面的任一配置命令。
+
+## cpu-test测试
 
 下面的命令编译并运行 `dummy` AM 测试。它是验证 NPC 是否可以正常工作的推荐入口：
 
@@ -69,8 +83,8 @@ make -C npc run \
 | `IMAGE` | 待加载的原始二进制镜像，通常为 `.bin`，必填 | 无 |
 | `ELF` | 对应 ELF 的符号信息，仅 FTrace 需要 | 无 |
 | `BATCH` | `1` 为批处理，`0` 为进入 SDB | `1` |
-| `DIFF` | NEMU DiffTest 共享库路径 | 无 |
-| `ITRACE`、`MTRACE`、`FTRACE` | 设为 `1`、`y`、`yes` 或 `true` 时启用相应文本追踪 | `0` |
+
+`DIFF`、`ITRACE`、`MTRACE`、`FTRACE` 不再是 Make 变量；传入这些旧变量会直接报迁移错误。
 
 批处理和 SDB 的 `c` 均不设仿真周期上限，会持续运行直到 trap、watchpoint、错误或 Verilator 结束仿真。`si [N]` 仍只执行用户显式指定的 `N` 个时钟周期。
 
@@ -82,35 +96,34 @@ make -C npc run \
 make -C npc ref
 ```
 
-它会生成 `nemu/build/riscv32-nemu-interpreter-so`。运行时传入该路径即可启用 DiffTest：
+它会生成 `nemu/build/riscv32-nemu-interpreter-so`。然后在 NPC 配置中启用
+`CONFIG_NPC_DIFFTEST`；`CONFIG_NPC_DIFFTEST_REF_PATH` 默认就是该路径（相对于 `npc/`）：
 
 ```bash
+make -C npc menuconfig
 make -C npc run \
-  IMAGE="$ROOT/am-kernels/tests/cpu-tests/build/dummy-riscv32e-npc.bin" \
-  DIFF="$ROOT/nemu/build/riscv32-nemu-interpreter-so" \
-  BATCH=1
+  IMAGE="$ROOT/am-kernels/tests/cpu-tests/build/dummy-riscv32e-npc.bin" BATCH=1
 ```
 
 运行完整 CPU 回归：
 
 ```bash
 make -C am-kernels/tests/cpu-tests \
-  ARCH=riscv32e-npc batch \
-  DIFF="$ROOT/nemu/build/riscv32-nemu-interpreter-so"
+  ARCH=riscv32e-npc batch
 ```
 
 CPU tests 中的 `wrong` 是故意触发 bad trap 的负例。查看测试日志时应将它与普通测试失败区分开，它不应用于成功冒烟测试。
 
 ## 交互调试（SDB）
 
-将 `BATCH=0` 传给 `make run` 后进入 `(npc)` 提示符。下面的例子同时打开三种文本追踪；`FTRACE=1` 时必须提供 `ELF`。
+将 `BATCH=0` 传给 `make run` 后进入 `(npc)` 提示符。文本追踪需先在 `menuconfig` 中启用；启用
+`CONFIG_NPC_FTRACE` 时每次运行必须提供 `ELF`。
 
 ```bash
 make -C npc run \
   IMAGE="$ROOT/am-kernels/tests/cpu-tests/build/dummy-riscv32e-npc.bin" \
   ELF="$ROOT/am-kernels/tests/cpu-tests/build/dummy-riscv32e-npc.elf" \
-  BATCH=0 \
-  ITRACE=1 MTRACE=1 FTRACE=1
+  BATCH=0
 ```
 
 | 命令 | 作用 |
@@ -129,9 +142,9 @@ make -C npc run \
 
 ## Trace 与波形
 
-- `ITRACE=1`：输出反汇编后的指令执行记录。
-- `MTRACE=1`：输出内存读写记录。
-- `FTRACE=1`：输出函数调用/返回记录，必须同时提供 `ELF=...`。
+- `CONFIG_NPC_ITRACE`：输出反汇编后的指令执行记录。
+- `CONFIG_NPC_MTRACE`：输出内存读写记录。
+- `CONFIG_NPC_FTRACE`：输出函数调用/返回记录，必须同时提供 `ELF=...`。
 - 通过本文的 `make -C npc run` 流程，仿真器初始化成功后会生成或覆盖 `npc/build/waveform.vcd`。该路径相对于 NPC 工作目录，直接运行可执行文件时会随当前目录变化。VCD 独立于文本 trace，可用查看器打开，例如：
 
   ```bash
@@ -152,5 +165,6 @@ AM 的 `npc.mk` 会自动生成 `.bin` 和 `.elf`，并将它们传给 `npc/Make
 ## 常见问题
 
 - 首次执行时 Mill 需要下载尚未缓存的依赖；若出现 `repo1.maven.org` 的 DNS 或下载错误，应先检查网络和本地依赖缓存。
-- `--ftrace requires --elf` 表示启用了 `FTRACE` 但没有设置 `ELF`。
+- `CONFIG_NPC_FTRACE requires --elf` 表示启用了函数 trace 但没有设置 `ELF`。
+- `--diff`、`--itrace`、`--mtrace`、`--ftrace` 和 `--trace` 是已删除的旧参数，请使用 `make menuconfig`。
 - `q` 只表示退出 SDB，并不等价于测试通过；批处理回归应以 `HIT GOOD TRAP` 和退出状态 `0` 为准。

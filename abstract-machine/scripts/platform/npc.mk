@@ -15,7 +15,9 @@ LDFLAGS   += --gc-sections -e _start
 
 # Both minirv-npc and riscv32e-npc use the same simulator checkout.
 NPC_HOME ?= $(abspath $(AM_HOME)/../npc)
-DIFF ?=
+ifneq ($(origin DIFF),undefined)
+$(error DIFF=... is no longer supported by the NPC platform; enable CONFIG_NPC_DIFFTEST with 'make -C $(NPC_HOME) menuconfig')
+endif
 
 MAINARGS_MAX_LEN = 64
 MAINARGS_PLACEHOLDER = the_insert-arg_rule_in_Makefile_will_insert_mainargs_here
@@ -30,9 +32,6 @@ image: image-dep
 	@$(OBJCOPY) -S --set-section-flags .bss=alloc,contents -O binary $(IMAGE).elf $(IMAGE).bin
 
 NPC_RUN_ARGS = IMAGE=$(IMAGE).bin ELF=$(IMAGE).elf
-ifneq ($(strip $(DIFF)),)
-NPC_RUN_ARGS += DIFF=$(DIFF)
-endif
 
 run: insert-arg
 	$(MAKE) -C $(NPC_HOME) run $(NPC_RUN_ARGS) BATCH=0

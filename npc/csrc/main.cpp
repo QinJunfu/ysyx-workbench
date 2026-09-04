@@ -6,6 +6,7 @@
 #include <cstring>
 #include <dlfcn.h>
 #include <elf.h>
+#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -19,6 +20,7 @@
 #include <vector>
 
 #include <capstone/capstone.h>
+#include <generated/autoconf.h>
 #include <verilated.h>
 #include <verilated_vcd_c.h>
 #include <VNpcTop.h>
@@ -47,12 +49,30 @@ struct Commit {
 struct Options {
   std::string image;
   std::string elf;
-  std::string diff;
   bool batch = false;
-  bool itrace = false;
-  bool mtrace = false;
-  bool ftrace = false;
 };
+
+#ifdef CONFIG_NPC_ITRACE
+constexpr bool kItraceEnabled = true;
+#else
+constexpr bool kItraceEnabled = false;
+#endif
+
+#ifdef CONFIG_NPC_MTRACE
+constexpr bool kMtraceEnabled = true;
+#else
+constexpr bool kMtraceEnabled = false;
+#endif
+
+#ifdef CONFIG_NPC_FTRACE
+constexpr bool kFtraceEnabled = true;
+#else
+constexpr bool kFtraceEnabled = false;
+#endif
+
+#ifndef NPC_CONFIG_ROOT
+#define NPC_CONFIG_ROOT "."
+#endif
 
 class PhysicalMemory {
  public:
@@ -146,8 +166,8 @@ class PhysicalMemory {
 class Trace {
  public:
   explicit Trace(const Options &options)
-      : itrace_enabled_(options.itrace), mtrace_enabled_(options.mtrace),
-        ftrace_enabled_(options.ftrace) {
+      : itrace_enabled_(kItraceEnabled), mtrace_enabled_(kMtraceEnabled),
+        ftrace_enabled_(kFtraceEnabled) {
     if (itrace_enabled_) {
       if (cs_open(CS_ARCH_RISCV, CS_MODE_RISCV32, &capstone_) != CS_ERR_OK) {
         throw std::runtime_error("cannot initialize Capstone for RV32");
@@ -157,7 +177,7 @@ class Trace {
     }
     if (ftrace_enabled_) {
       if (options.elf.empty()) {
-        throw std::runtime_error("--ftrace requires --elf");
+        throw std::runtime_error("CONFIG_NPC_FTRACE requires --elf");
       }
       load_elf(options.elf);
     }
@@ -627,10 +647,21 @@ class Simulator {
   bool load_image(std::string *error) { return memory_.load_image(options_.image, error); }
 
   bool initialize_difftest(std::string *error) {
-    if (options_.diff.empty()) {
-      return true;
+#ifdef CONFIG_NPC_DIFFTEST
+    const std::string configured_path = CONFIG_NPC_DIFFTEST_REF_PATH;
+    if (configured_path.empty()) {
+      *error = "CONFIG_NPC_DIFFTEST_REF_PATH is empty; set it with 'make menuconfig'";
+      return false;
     }
-    return difftest_.initialize(options_.diff, memory_, kPmemBase, error);
+    std::filesystem::path path(configured_path);
+    if (path.is_relative()) {
+      path = std::filesystem::path(NPC_CONFIG_ROOT) / path;
+    }
+    return difftest_.initialize(path.lexically_normal().string(), memory_, kPmemBase, error);
+#else
+    (void)error;
+    return true;
+#endif
   }
 
   void initialize(int argc, char **argv) {
@@ -966,23 +997,25 @@ Options parse_options(int argc, char **argv) {
       options.image = require_value("--image");
     } else if (argument == "--elf") {
       options.elf = require_value("--elf");
-    } else if (argument == "--diff") {
-      options.diff = require_value("--diff");
+    } else if (argument == "--diff" || argument.rfind("--diff=", 0) == 0) {
+      throw std::runtime_error(
+          "--diff is no longer supported; enable CONFIG_NPC_DIFFTEST with 'make menuconfig'");
     } else if (argument == "--batch") {
       options.batch = true;
-    } else if (argument == "--itrace") {
-      options.itrace = true;
-    } else if (argument == "--mtrace") {
-      options.mtrace = true;
-    } else if (argument == "--ftrace") {
-      options.ftrace = true;
-    } else if (argument == "--trace") {
-      options.itrace = true;
-      options.mtrace = true;
-      options.ftrace = true;
+    } else if (argument == "--itrace" || argument.rfind("--itrace=", 0) == 0) {
+      throw std::runtime_error(
+          "--itrace is no longer supported; enable CONFIG_NPC_ITRACE with 'make menuconfig'");
+    } else if (argument == "--mtrace" || argument.rfind("--mtrace=", 0) == 0) {
+      throw std::runtime_error(
+          "--mtrace is no longer supported; enable CONFIG_NPC_MTRACE with 'make menuconfig'");
+    } else if (argument == "--ftrace" || argument.rfind("--ftrace=", 0) == 0) {
+      throw std::runtime_error(
+          "--ftrace is no longer supported; enable CONFIG_NPC_FTRACE with 'make menuconfig'");
+    } else if (argument == "--trace" || argument.rfind("--trace=", 0) == 0) {
+      throw std::runtime_error(
+          "--trace is no longer supported; enable tracing with 'make menuconfig'");
     } else if (argument == "--help") {
-      std::cout << "usage: VNpcTop --image IMAGE [--elf ELF] [--batch] [--diff REF_SO] "
-                   "[--itrace] [--mtrace] [--ftrace]\n";
+      std::cout << "usage: VNpcTop --image IMAGE [--elf ELF] [--batch]\n";
       std::exit(0);
     } else {
       throw std::runtime_error("unknown option: " + argument);

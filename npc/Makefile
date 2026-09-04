@@ -9,6 +9,30 @@ NEMU_HOME ?= $(abspath ../nemu)
 MILL ?= /usr/bin/mill
 VERILATOR ?= verilator
 
+include scripts/config.mk
+
+ifneq ($(origin DIFF),undefined)
+$(error DIFF=... is no longer supported; enable CONFIG_NPC_DIFFTEST with 'make menuconfig')
+endif
+ifneq ($(origin ITRACE),undefined)
+$(error ITRACE=... is no longer supported; enable CONFIG_NPC_ITRACE with 'make menuconfig')
+endif
+ifneq ($(origin MTRACE),undefined)
+$(error MTRACE=... is no longer supported; enable CONFIG_NPC_MTRACE with 'make menuconfig')
+endif
+ifneq ($(origin FTRACE),undefined)
+$(error FTRACE=... is no longer supported; enable CONFIG_NPC_FTRACE with 'make menuconfig')
+endif
+
+ifeq ($(wildcard $(CONFIG_FILE)),)
+ifeq ($(strip $(MAKECMDGOALS)),)
+$(error NPC configuration is missing; run 'make menuconfig' or 'make default_defconfig' first)
+endif
+ifneq ($(filter all sim run,$(MAKECMDGOALS)),)
+$(error NPC configuration is missing; run 'make menuconfig' or 'make default_defconfig' first)
+endif
+endif
+
 SCALA_SRCS := $(sort $(shell find src -type f -name '*.scala'))
 CSRC := $(sort $(shell find csrc -type f \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' \)))
 RTL_SV := $(RTL_DIR)/NPC.sv
@@ -20,30 +44,14 @@ CXXFLAGS ?= -std=c++20 -O2 -Wall -Wextra
 
 IMAGE ?=
 ELF ?=
-DIFF ?=
 BATCH ?= 1
-ITRACE ?= 0
-MTRACE ?= 0
-FTRACE ?= 0
 
 RUN_ARGS := --image "$(IMAGE)"
 ifneq ($(strip $(ELF)),)
 RUN_ARGS += --elf "$(ELF)"
 endif
-ifneq ($(strip $(DIFF)),)
-RUN_ARGS += --diff "$(DIFF)"
-endif
 ifneq ($(filter 1 y yes true,$(BATCH)),)
 RUN_ARGS += --batch
-endif
-ifneq ($(filter 1 y yes true,$(ITRACE)),)
-RUN_ARGS += --itrace
-endif
-ifneq ($(filter 1 y yes true,$(MTRACE)),)
-RUN_ARGS += --mtrace
-endif
-ifneq ($(filter 1 y yes true,$(FTRACE)),)
-RUN_ARGS += --ftrace
 endif
 
 .DEFAULT_GOAL := all
@@ -69,12 +77,12 @@ $(RTL_SV): $(SCALA_SRCS) build.mill .mill-version | $(RTL_DIR)
 verilog: $(RTL_SV)
 	$(call git_commit, "generate verilog")
 
-$(SIM): $(RTL_SV) $(VSRC) $(CSRC) | $(OBJ_DIR)
+$(SIM): $(RTL_SV) $(VSRC) $(CSRC) $(CONFIG_HEADER) | $(OBJ_DIR)
 	@$(foreach source,$(RTL_SV) $(VSRC),printf '+V %s\n' '$(notdir $(source))';)
 	@$(foreach source,$(CSRC),printf '+CC %s\n' '$(notdir $(source))';)
 	@$(VERILATOR) --cc --exe --build --trace --Wno-fatal \
 		--top-module $(TOP_MODULE) --Mdir $(OBJ_DIR) \
-		-CFLAGS "$(CXXFLAGS) $(CAPSTONE_CFLAGS)" \
+		-CFLAGS "$(CXXFLAGS) $(CAPSTONE_CFLAGS) -I$(abspath include) -DNPC_CONFIG_ROOT=\\\"$(abspath .)\\\"" \
 		-LDFLAGS "$(CAPSTONE_LIBS) -ldl" \
 		$(RTL_SV) $(VSRC) $(CSRC) >$(VERILATOR_LOG) 2>&1 || { cat $(VERILATOR_LOG); exit 1; }
 	@grep -E '^- V e r i l a t i o n +R e p o r t:|^- Verilator:' $(VERILATOR_LOG) || true
@@ -88,6 +96,10 @@ run: sim
 	$(SIM) $(RUN_ARGS)
 
 help:
+	@echo '  menuconfig      - Update NPC debugging configuration'
+	@echo '  default_defconfig - Load the default NPC configuration'
+	@echo '  savedefconfig   - Save current configuration to configs/defconfig'
+	@echo '  config-clean    - Remove generated NPC configuration files'
 	$(MILL) -i runMain Elaborate --help
 
 reformat:
