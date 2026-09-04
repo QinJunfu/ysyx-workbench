@@ -15,6 +15,7 @@
 
 #include <isa.h>
 #include <memory/paddr.h>
+#include "sdb/sdb.h"
 
 void init_rand();
 void init_log(const char *log_file);
@@ -36,13 +37,81 @@ static void welcome() {
 
 #ifndef CONFIG_TARGET_AM
 #include <getopt.h>
+#include <ctype.h>
+#include <errno.h>
 
 void sdb_set_batch_mode();
 
 static char *log_file = NULL;
 static char *diff_so_file = NULL;
 static char *img_file = NULL;
+static char *expr_test_file = NULL;
 static int difftest_port = 1234;
+
+#define EXPR_TEST_LINE_SIZE 8192
+
+static int run_expr_tests(const char *path) {
+  FILE *fp = fopen(path, "r");
+  if (fp == NULL) {
+    perror(path);
+    return 1;
+  }
+
+  char line[EXPR_TEST_LINE_SIZE];
+  int line_nr = 0;
+  int passed = 0;
+  while (fgets(line, sizeof(line), fp) != NULL) {
+    line_nr ++;
+    if (strchr(line, '\n') == NULL && !feof(fp)) {
+      printf("Expression test line %d is too long\n", line_nr);
+      fclose(fp);
+      return 1;
+    }
+    line[strcspn(line, "\n")] = '\0';
+
+    errno = 0;
+    char *end = NULL;
+    unsigned long long expected = strtoull(line, &end, 10);
+    if (errno == ERANGE || end == line || expected > UINT32_MAX ||
+        !isspace((unsigned char)*end)) {
+      printf("Malformed expression test at line %d\n", line_nr);
+      fclose(fp);
+      return 1;
+    }
+    while (isspace((unsigned char)*end)) {
+      end ++;
+    }
+    if (*end == '\0') {
+      printf("Missing expression at line %d\n", line_nr);
+      fclose(fp);
+      return 1;
+    }
+
+    bool success;
+    word_t actual = expr(end, &success);
+    if (!success) {
+      printf("Invalid expression at line %d: %s\n", line_nr, end);
+      fclose(fp);
+      return 1;
+    }
+    if (actual != (word_t)expected) {
+      printf("Expression test failed at line %d: expected %u, got %u: %s\n",
+          line_nr, (unsigned)expected, (unsigned)actual, end);
+      fclose(fp);
+      return 1;
+    }
+    passed ++;
+  }
+
+  if (ferror(fp)) {
+    perror(path);
+    fclose(fp);
+    return 1;
+  }
+  fclose(fp);
+  printf("Expression tests passed: %d\n", passed);
+  return 0;
+}
 
 static long load_img() {
   if (img_file == NULL) {
@@ -72,16 +141,18 @@ static int parse_args(int argc, char *argv[]) {
     {"log"      , required_argument, NULL, 'l'},
     {"diff"     , required_argument, NULL, 'd'},
     {"port"     , required_argument, NULL, 'p'},
+    {"expr-test", required_argument, NULL, 'e'},
     {"help"     , no_argument      , NULL, 'h'},
     {0          , 0                , NULL,  0 },
   };
   int o;
-  while ( (o = getopt_long(argc, argv, "-bhl:d:p:", table, NULL)) != -1) {
+  while ( (o = getopt_long(argc, argv, "-bhl:d:p:e:", table, NULL)) != -1) {
     switch (o) {
       case 'b': sdb_set_batch_mode(); break;
       case 'p': sscanf(optarg, "%d", &difftest_port); break;
       case 'l': log_file = optarg; break;
       case 'd': diff_so_file = optarg; break;
+      case 'e': expr_test_file = optarg; break;
       case 1: img_file = optarg; return 0;
       default:
         printf("Usage: %s [OPTION...] IMAGE [args]\n\n", argv[0]);
@@ -89,6 +160,7 @@ static int parse_args(int argc, char *argv[]) {
         printf("\t-l,--log=FILE           output log to FILE\n");
         printf("\t-d,--diff=REF_SO        run DiffTest with reference REF_SO\n");
         printf("\t-p,--port=PORT          run DiffTest with port PORT\n");
+        printf("\t-e,--expr-test=FILE    verify expressions from FILE\n");
         printf("\n");
         exit(0);
     }
@@ -101,6 +173,11 @@ void init_monitor(int argc, char *argv[]) {
 
   /* Parse arguments. */
   parse_args(argc, argv);
+
+  if (expr_test_file != NULL) {
+    init_sdb();
+    exit(run_expr_tests(expr_test_file));
+  }
 
   /* Set random seed. */
   init_rand();

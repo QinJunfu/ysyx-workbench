@@ -119,6 +119,26 @@ static int cmd_info(char *args) {
   return 0;
 }
 
+static int cmd_p(char *args) {
+  while (args != NULL && isspace((unsigned char)*args)) {
+    args ++;
+  }
+  if (args == NULL || *args == '\0') {
+    printf("Usage: p EXPR\n");
+    return 0;
+  }
+
+  bool success;
+  word_t result = expr(args, &success);
+  if (!success) {
+    printf("Bad expression\n");
+    return 0;
+  }
+
+  printf(FMT_WORD "\n", result);
+  return 0;
+}
+
 static int cmd_x(char *args) {
   char *n_str = next_arg(&args);
   char *addr_str = next_arg(&args);
@@ -169,6 +189,7 @@ static struct {
   { "c", "Continue the execution of the program", cmd_c },
   { "si", "Step through N instructions (default: 1)", cmd_si },
   { "info", "Display program status (info r)", cmd_info },
+  { "p", "Evaluate an arithmetic expression", cmd_p },
   { "x", "Examine N 4-byte words at a hexadecimal address", cmd_x },
   { "q", "Exit NEMU", cmd_q },
 };
