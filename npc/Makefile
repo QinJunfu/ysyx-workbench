@@ -22,12 +22,11 @@ IMAGE ?=
 ELF ?=
 DIFF ?=
 BATCH ?= 1
-MAX_CYCLES ?= 10000000
 ITRACE ?= 0
 MTRACE ?= 0
 FTRACE ?= 0
 
-RUN_ARGS := --image "$(IMAGE)" --max-cycles $(MAX_CYCLES)
+RUN_ARGS := --image "$(IMAGE)"
 ifneq ($(strip $(ELF)),)
 RUN_ARGS += --elf "$(ELF)"
 endif

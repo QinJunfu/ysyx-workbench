@@ -15,7 +15,6 @@ LDFLAGS   += --gc-sections -e _start
 
 # Both minirv-npc and riscv32e-npc use the same simulator checkout.
 NPC_HOME ?= $(abspath $(AM_HOME)/../npc)
-MAX_CYCLES ?=
 DIFF ?=
 
 MAINARGS_MAX_LEN = 64
@@ -31,9 +30,6 @@ image: image-dep
 	@$(OBJCOPY) -S --set-section-flags .bss=alloc,contents -O binary $(IMAGE).elf $(IMAGE).bin
 
 NPC_RUN_ARGS = IMAGE=$(IMAGE).bin ELF=$(IMAGE).elf
-ifneq ($(strip $(MAX_CYCLES)),)
-NPC_RUN_ARGS += MAX_CYCLES=$(MAX_CYCLES)
-endif
 ifneq ($(strip $(DIFF)),)
 NPC_RUN_ARGS += DIFF=$(DIFF)
 endif

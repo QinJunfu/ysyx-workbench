@@ -52,7 +52,6 @@ struct Options {
   bool itrace = false;
   bool mtrace = false;
   bool ftrace = false;
-  uint64_t max_cycles = 10000000;
 };
 
 class PhysicalMemory {
@@ -664,7 +663,7 @@ class Simulator {
 
   int run() {
     if (options_.batch) {
-      execute(options_.max_cycles);
+      execute();
     } else {
       std::cout << "NPC sdb. Type 'help' for commands.\n";
       sdb();
@@ -744,16 +743,20 @@ class Simulator {
     ++cycles_;
   }
 
-  void execute(uint64_t limit, bool fail_on_limit = true) {
+  void execute() {
     stop_requested_ = false;
-    const uint64_t target = cycles_ + limit;
-    while (!halted_ && !fatal_ && !quit_ && !stop_requested_ && cycles_ < target &&
-           !context_->gotFinish()) {
+    while (!halted_ && !fatal_ && !quit_ && !stop_requested_ && !context_->gotFinish()) {
       single_cycle();
     }
-    if (fail_on_limit && !halted_ && !fatal_ && !quit_ && !stop_requested_ && cycles_ >= target) {
-      fatal("simulation reached cycle limit");
-      trace_.dump_recent();
+  }
+
+  void execute(uint64_t count) {
+    stop_requested_ = false;
+    for (uint64_t executed = 0;
+         executed < count && !halted_ && !fatal_ && !quit_ && !stop_requested_ &&
+         !context_->gotFinish();
+         ++executed) {
+      single_cycle();
     }
   }
 
@@ -854,13 +857,13 @@ class Simulator {
           continue;
         }
         if (command == "c") {
-          execute(options_.max_cycles);
+          execute();
         } else if (command == "si") {
           uint64_t count = 1;
           if (!rest.empty()) {
             count = std::stoull(rest, nullptr, 0);
           }
-          execute(count, false);
+          execute(count);
         } else if (command == "info" && rest == "r") {
           print_registers();
         } else if (command == "info" && rest == "w") {
@@ -965,8 +968,6 @@ Options parse_options(int argc, char **argv) {
       options.elf = require_value("--elf");
     } else if (argument == "--diff") {
       options.diff = require_value("--diff");
-    } else if (argument == "--max-cycles") {
-      options.max_cycles = std::stoull(require_value("--max-cycles"), nullptr, 0);
     } else if (argument == "--batch") {
       options.batch = true;
     } else if (argument == "--itrace") {
@@ -981,7 +982,7 @@ Options parse_options(int argc, char **argv) {
       options.ftrace = true;
     } else if (argument == "--help") {
       std::cout << "usage: VNpcTop --image IMAGE [--elf ELF] [--batch] [--diff REF_SO] "
-                   "[--itrace] [--mtrace] [--ftrace] [--max-cycles N]\n";
+                   "[--itrace] [--mtrace] [--ftrace]\n";
       std::exit(0);
     } else {
       throw std::runtime_error("unknown option: " + argument);
