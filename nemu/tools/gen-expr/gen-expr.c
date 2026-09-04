@@ -140,6 +140,22 @@ static bool gen_parenthesized_expr(unsigned depth) {
   return false;
 }
 
+static bool gen_unary_expr(unsigned depth) {
+  size_t saved_buf_len = buf_len;
+  size_t saved_oracle_len = oracle_len;
+
+  /* The space prevents consecutive unary minuses from becoming C's -- token. */
+  if (append_pair("- ", "- ") && gen_rand_expr(depth + 1)) {
+    return true;
+  }
+
+  buf_len = saved_buf_len;
+  oracle_len = saved_oracle_len;
+  buf[buf_len] = '\0';
+  oracle_buf[oracle_len] = '\0';
+  return false;
+}
+
 static bool gen_binary_expr(unsigned depth) {
   static const char operators[] = "+-*/";
   size_t saved_buf_len = buf_len;
@@ -164,11 +180,16 @@ static bool gen_rand_expr(unsigned depth) {
     return gen_num(false);
   }
 
-  switch (choose(3)) {
+  switch (choose(4)) {
     case 0:
       return gen_num(false);
     case 1:
       if (gen_parenthesized_expr(depth)) {
+        return true;
+      }
+      break;
+    case 2:
+      if (gen_unary_expr(depth)) {
         return true;
       }
       break;

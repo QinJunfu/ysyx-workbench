@@ -23,7 +23,7 @@
 #include <regex.h>
 
 enum {
-  TK_NOTYPE = 256, TK_NUM, TK_EQ,
+  TK_NOTYPE = 256, TK_NUM, TK_EQ, TK_NEG,
 };
 
 static struct rule {
@@ -71,6 +71,18 @@ typedef struct token {
 
 static Token tokens[NR_TOKEN_MAX] = {};
 static int nr_token = 0;
+
+static bool is_expr_end(int type) {
+  return type == TK_NUM || type == ')';
+}
+
+static void recognize_unary_minus(void) {
+  for (int i = 0; i < nr_token; i ++) {
+    if (tokens[i].type == '-' && (i == 0 || !is_expr_end(tokens[i - 1].type))) {
+      tokens[i].type = TK_NEG;
+    }
+  }
+}
 
 static bool append_token(int type, const char *str, int len) {
   if (type == TK_NOTYPE) {
@@ -130,6 +142,7 @@ static bool make_token(char *e) {
     }
   }
 
+  recognize_unary_minus();
   return true;
 }
 
@@ -237,9 +250,19 @@ static word_t eval(int p, int q, bool *success) {
   }
 
   int op = find_main_op(p, q, &valid);
-  if (!valid || op < 0) {
+  if (!valid) {
     *success = false;
     return 0;
+  }
+
+  if (op < 0) {
+    if (tokens[p].type != TK_NEG) {
+      *success = false;
+      return 0;
+    }
+
+    word_t value = eval(p + 1, q, success);
+    return *success ? (word_t)(0 - value) : 0;
   }
 
   word_t val1 = eval(p, op - 1, success);
