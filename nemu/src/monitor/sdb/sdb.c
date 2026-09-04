@@ -18,6 +18,7 @@
 #include <memory/paddr.h>
 #include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include <readline/readline.h>
 #include <readline/history.h>
 #include "sdb.h"
@@ -106,12 +107,15 @@ static int cmd_si(char *args) {
 static int cmd_info(char *args) {
   char *subcmd = next_arg(&args);
   if (subcmd == NULL || next_arg(&args) != NULL) {
-    printf("Usage: info r\n");
+    printf("Usage: info r|w\n");
     return 0;
   }
 
   if (strcmp(subcmd, "r") == 0) {
     isa_reg_display();
+  }
+  else if (strcmp(subcmd, "w") == 0) {
+    print_watchpoints();
   }
   else {
     printf("Unknown info subcommand '%s'\n", subcmd);
@@ -141,17 +145,16 @@ static int cmd_p(char *args) {
 
 static int cmd_x(char *args) {
   char *n_str = next_arg(&args);
-  char *addr_str = next_arg(&args);
   uint64_t n;
-  uint64_t addr_value;
+  while (args != NULL && isspace((unsigned char)*args)) args++;
 
-  if (n_str == NULL || addr_str == NULL || next_arg(&args) != NULL ||
-      !parse_uint64(n_str, 10, &n) || n == 0 ||
-      !parse_uint64(addr_str, 16, &addr_value) ||
-      (uint64_t)(paddr_t)addr_value != addr_value) {
-    printf("Usage: x N ADDR, where ADDR is a hexadecimal address\n");
+  if (n_str == NULL || args == NULL || *args == '\0' || !parse_uint64(n_str, 10, &n) || n == 0) {
+    printf("Usage: x N EXPR\n");
     return 0;
   }
+  bool success;
+  word_t addr_value = expr(args, &success);
+  if (!success) { printf("Bad expression\n"); return 0; }
 
   paddr_t addr = (paddr_t)addr_value;
   if (!in_pmem(addr) || PMEM_RIGHT - addr < 3) {
@@ -173,6 +176,27 @@ static int cmd_x(char *args) {
   return 0;
 }
 
+static int cmd_w(char *args) {
+  while (args != NULL && isspace((unsigned char)*args)) args++;
+  if (args == NULL || *args == '\0') { printf("Usage: w EXPR\n"); return 0; }
+#ifndef CONFIG_WATCHPOINT
+  printf("Watchpoints are disabled\n"); return 0;
+#else
+  bool success; word_t value = expr(args, &success);
+  if (!success) { printf("Bad expression\n"); return 0; }
+  WP *wp = new_wp(args, value);
+  if (wp != NULL) printf("Watchpoint %d: %s = " FMT_WORD "\n", wp->NO, wp->expr, value);
+  return 0;
+#endif
+}
+
+static int cmd_d(char *args) {
+  char *no_str = next_arg(&args); uint64_t no;
+  if (no_str == NULL || next_arg(&args) != NULL || !parse_uint64(no_str, 10, &no) || no > INT_MAX || !free_wp((int)no))
+    printf("No such watchpoint\n");
+  return 0;
+}
+
 static int cmd_q(char *args) {
   nemu_state.state = NEMU_QUIT;
   return -1;
@@ -188,9 +212,11 @@ static struct {
   { "help", "Display information about all supported commands", cmd_help },
   { "c", "Continue the execution of the program", cmd_c },
   { "si", "Step through N instructions (default: 1)", cmd_si },
-  { "info", "Display program status (info r)", cmd_info },
+  { "info", "Display program status (info r/w)", cmd_info },
   { "p", "Evaluate an arithmetic expression", cmd_p },
-  { "x", "Examine N 4-byte words at a hexadecimal address", cmd_x },
+  { "x", "Examine N 4-byte words at an expression address", cmd_x },
+  { "w", "Set a watchpoint", cmd_w },
+  { "d", "Delete a watchpoint", cmd_d },
   { "q", "Exit NEMU", cmd_q },
 };
 

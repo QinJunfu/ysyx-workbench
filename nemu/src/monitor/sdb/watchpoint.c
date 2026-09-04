@@ -14,16 +14,10 @@
 ***************************************************************************************/
 
 #include "sdb.h"
+#include <stdlib.h>
+#include <string.h>
 
 #define NR_WP 32
-
-typedef struct watchpoint {
-  int NO;
-  struct watchpoint *next;
-
-  /* TODO: Add more members if necessary */
-
-} WP;
 
 static WP wp_pool[NR_WP] = {};
 static WP *head = NULL, *free_ = NULL;
@@ -39,5 +33,61 @@ void init_wp_pool() {
   free_ = wp_pool;
 }
 
-/* TODO: Implement the functionality of watchpoint */
+WP *new_wp(const char *expression, word_t value) {
+  if (free_ == NULL) {
+    printf("No free watchpoint available\n");
+    return NULL;
+  }
+  WP *wp = free_;
+  free_ = wp->next;
+  wp->expr = strdup(expression);
+  if (wp->expr == NULL) { wp->next = free_; free_ = wp; return NULL; }
+  wp->value = value;
+  wp->next = head;
+  head = wp;
+  return wp;
+}
 
+bool free_wp(int no) {
+  WP **pp = &head;
+  while (*pp != NULL && (*pp)->NO != no) pp = &(*pp)->next;
+  if (*pp == NULL) return false;
+  WP *wp = *pp;
+  *pp = wp->next;
+  free(wp->expr);
+  wp->expr = NULL;
+  wp->next = free_;
+  free_ = wp;
+  return true;
+}
+
+WP *find_wp(int no) {
+  for (WP *wp = head; wp != NULL; wp = wp->next) if (wp->NO == no) return wp;
+  return NULL;
+}
+
+void print_watchpoints(void) {
+  if (head == NULL) { printf("No watchpoints\n"); return; }
+  for (WP *wp = head; wp != NULL; wp = wp->next)
+    printf("%d: %s = " FMT_WORD "\n", wp->NO, wp->expr, wp->value);
+}
+
+bool check_watchpoints(void) {
+#ifndef CONFIG_WATCHPOINT
+  return false;
+#else
+  bool stopped = false;
+  for (WP *wp = head; wp != NULL; wp = wp->next) {
+    bool success = false;
+    word_t value = expr(wp->expr, &success);
+    if (!success) continue;
+    if (value != wp->value) {
+      printf("Watchpoint %d triggered: %s\nold value = " FMT_WORD ", new value = " FMT_WORD "\n",
+             wp->NO, wp->expr, wp->value, value);
+      wp->value = value;
+      stopped = true;
+    }
+  }
+  return stopped;
+#endif
+}

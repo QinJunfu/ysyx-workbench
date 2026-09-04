@@ -14,6 +14,7 @@
 ***************************************************************************************/
 
 #include <isa.h>
+#include <memory/vaddr.h>
 #include <errno.h>
 #include <limits.h>
 
@@ -23,7 +24,7 @@
 #include <regex.h>
 
 enum {
-  TK_NOTYPE = 256, TK_NUM, TK_EQ, TK_NEG,
+  TK_NOTYPE = 256, TK_NUM, TK_REG, TK_EQ, TK_NE, TK_AND, TK_NEG, TK_DEREF,
 };
 
 static struct rule {
@@ -31,7 +32,9 @@ static struct rule {
   int token_type;
 } rules[] = {
   {"[ \\t]+", TK_NOTYPE},
+  {"0[xX][0-9a-fA-F]+", TK_NUM},
   {"[0-9]+", TK_NUM},
+  {"\\$[a-zA-Z0-9]+", TK_REG},
   {"\\+", '+'},
   {"-", '-'},
   {"\\*", '*'},
@@ -39,6 +42,8 @@ static struct rule {
   {"\\(", '('},
   {"\\)", ')'},
   {"==", TK_EQ},
+  {"!=", TK_NE},
+  {"&&", TK_AND},
 };
 
 #define NR_REGEX ARRLEN(rules)
@@ -73,13 +78,14 @@ static Token tokens[NR_TOKEN_MAX] = {};
 static int nr_token = 0;
 
 static bool is_expr_end(int type) {
-  return type == TK_NUM || type == ')';
+  return type == TK_NUM || type == TK_REG || type == ')';
 }
 
 static void recognize_unary_minus(void) {
   for (int i = 0; i < nr_token; i ++) {
-    if (tokens[i].type == '-' && (i == 0 || !is_expr_end(tokens[i - 1].type))) {
-      tokens[i].type = TK_NEG;
+    if (!is_expr_end(i == 0 ? TK_NOTYPE : tokens[i - 1].type)) {
+      if (tokens[i].type == '-') tokens[i].type = TK_NEG;
+      if (tokens[i].type == '*') tokens[i].type = TK_DEREF;
     }
   }
 }
@@ -97,7 +103,7 @@ static bool append_token(int type, const char *str, int len) {
   Token *token = &tokens[nr_token];
   token->type = type;
   token->str[0] = '\0';
-  if (type == TK_NUM) {
+  if (type == TK_NUM || type == TK_REG) {
     if (len >= (int)sizeof(token->str)) {
       printf("Token is too long\n");
       return false;
@@ -175,8 +181,10 @@ static bool check_parentheses(int p, int q, bool *valid) {
 
 static int precedence(int type) {
   switch (type) {
-    case '+': case '-': return 1;
-    case '*': case '/': return 2;
+    case TK_AND: return 1;
+    case TK_EQ: case TK_NE: return 2;
+    case '+': case '-': return 3;
+    case '*': case '/': return 4;
     default: return -1;
   }
 }
@@ -218,7 +226,7 @@ static int find_main_op(int p, int q, bool *valid) {
 static word_t parse_number(const char *str, bool *success) {
   char *end = NULL;
   errno = 0;
-  unsigned long long value = strtoull(str, &end, 10);
+  unsigned long long value = strtoull(str, &end, 0);
   if (errno == ERANGE || end == str || *end != '\0' || value > UINT32_MAX) {
     *success = false;
     return 0;
@@ -233,6 +241,9 @@ static word_t eval(int p, int q, bool *success) {
   }
 
   if (p == q) {
+    if (tokens[p].type == TK_REG) {
+      return isa_reg_str2val(tokens[p].str, success);
+    }
     if (tokens[p].type != TK_NUM) {
       *success = false;
       return 0;
@@ -256,23 +267,23 @@ static word_t eval(int p, int q, bool *success) {
   }
 
   if (op < 0) {
-    if (tokens[p].type != TK_NEG) {
+    if (tokens[p].type != TK_NEG && tokens[p].type != TK_DEREF) {
       *success = false;
       return 0;
     }
 
     word_t value = eval(p + 1, q, success);
-    return *success ? (word_t)(0 - value) : 0;
+    if (!*success) return 0;
+    return tokens[p].type == TK_NEG ? (word_t)(0 - value) : vaddr_read((vaddr_t)value, 4);
   }
 
   word_t val1 = eval(p, op - 1, success);
   if (!*success) {
     return 0;
   }
+  if (tokens[op].type == TK_AND && val1 == 0) return 0;
   word_t val2 = eval(op + 1, q, success);
-  if (!*success) {
-    return 0;
-  }
+  if (!*success) return 0;
 
   switch (tokens[op].type) {
     case '+': return val1 + val2;
@@ -284,6 +295,9 @@ static word_t eval(int p, int q, bool *success) {
         return 0;
       }
       return val1 / val2;
+    case TK_EQ: return val1 == val2;
+    case TK_NE: return val1 != val2;
+    case TK_AND: return (val1 != 0) && (val2 != 0);
     default:
       *success = false;
       return 0;

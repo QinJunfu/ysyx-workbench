@@ -126,6 +126,11 @@ endmenu
 
 menu "Testing and Debugging"
 
+config WATCHPOINT
+  depends on !TARGET_AM
+  bool "Enable watchpoints"
+  default y
+
 
 config TRACE
   bool "Enable tracer"
