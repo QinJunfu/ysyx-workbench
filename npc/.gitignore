@@ -6,11 +6,13 @@
 !*.scala
 !*.[cSh]
 !*.v
+!*.sv
 !*.cpp
 !*.cc
 !.gitignore
 !.scalafmt.conf
 !README.md
+!scripts/build-nemu-ref.sh
 build/
 
 # mill

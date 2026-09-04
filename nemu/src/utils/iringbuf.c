@@ -3,6 +3,7 @@
 #define IRINGBUF_SIZE 16
 #define IRINGBUF_LOG_SIZE 128
 
+#ifdef CONFIG_IQUEUE
 typedef struct {
   vaddr_t pc;
   char logbuf[IRINGBUF_LOG_SIZE];
@@ -13,6 +14,7 @@ static struct {
   int head;
   int count;
 } iringbuf;
+#endif
 
 void iringbuf_record(vaddr_t pc, const char *logbuf) {
 #ifdef CONFIG_IQUEUE

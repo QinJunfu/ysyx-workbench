@@ -9,35 +9,31 @@
 * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-*
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-#ifndef __ISA_RISCV_H__
-#define __ISA_RISCV_H__
+#ifndef __RISCV_CSR_H__
+#define __RISCV_CSR_H__
 
 #include <common.h>
 
-typedef struct {
-  word_t gpr[MUXDEF(CONFIG_RVE, 16, 32)];
-  vaddr_t pc;
-  // Keep the DiffTest register ABI as GPRs followed by pc.  CSR state is
-  // intentionally placed after it and stays local to the reference model.
-  word_t mstatus;
-  word_t mtvec;
-  word_t mscratch;
-  word_t mepc;
-  word_t mcause;
-  word_t mip;
-  uint64_t mcycle;
-  uint64_t minstret;
-} MUXDEF(CONFIG_RV64, riscv64_CPU_state, riscv32_CPU_state);
+enum {
+  RISCV_CSR_MSTATUS = 0x300,
+  RISCV_CSR_MISA = 0x301,
+  RISCV_CSR_MTVEC = 0x305,
+  RISCV_CSR_MSCRATCH = 0x340,
+  RISCV_CSR_MEPC = 0x341,
+  RISCV_CSR_MCAUSE = 0x342,
+  RISCV_CSR_MIP = 0x344,
+  RISCV_CSR_MCYCLE = 0xb00,
+  RISCV_CSR_MINSTRET = 0xb02,
+  RISCV_CSR_MHARTID = 0xf14,
+};
 
-// decode
-typedef struct {
-  uint32_t inst;
-} MUXDEF(CONFIG_RV64, riscv64_ISADecodeInfo, riscv32_ISADecodeInfo);
-
-#define isa_mmu_check(vaddr, len, type) (MMU_DIRECT)
+void riscv_csr_reset(void);
+bool riscv_csr_read(word_t addr, word_t *value);
+bool riscv_csr_write(word_t addr, word_t value);
+void riscv_csr_begin_inst(void);
+void riscv_csr_finish_inst(void);
 
 #endif

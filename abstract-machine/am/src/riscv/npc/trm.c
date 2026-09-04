@@ -15,7 +15,8 @@ void putch(char ch) {
 }
 
 void halt(int code) {
-  asm volatile("ebreak");
+  // The simulator reads a0 when the ebreak retires, matching the AM trap ABI.
+  asm volatile("mv a0, %0\n\tebreak" : : "r"(code) : "a0", "memory");
   while (1);
 }
 

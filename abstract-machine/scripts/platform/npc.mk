@@ -13,6 +13,11 @@ LDSCRIPTS += $(AM_HOME)/scripts/linker.ld
 LDFLAGS   += --defsym=_pmem_start=0x80000000 --defsym=_entry_offset=0x0
 LDFLAGS   += --gc-sections -e _start
 
+# Both minirv-npc and riscv32e-npc use the same simulator checkout.
+NPC_HOME ?= $(abspath $(AM_HOME)/../npc)
+MAX_CYCLES ?=
+DIFF ?=
+
 MAINARGS_MAX_LEN = 64
 MAINARGS_PLACEHOLDER = the_insert-arg_rule_in_Makefile_will_insert_mainargs_here
 CFLAGS += -DMAINARGS_MAX_LEN=$(MAINARGS_MAX_LEN) -DMAINARGS_PLACEHOLDER=$(MAINARGS_PLACEHOLDER)
@@ -25,7 +30,18 @@ image: image-dep
 	@echo + OBJCOPY "->" $(IMAGE_REL).bin
 	@$(OBJCOPY) -S --set-section-flags .bss=alloc,contents -O binary $(IMAGE).elf $(IMAGE).bin
 
-run: insert-arg
-	echo "TODO: add command here to run simulation"
+NPC_RUN_ARGS = IMAGE=$(IMAGE).bin ELF=$(IMAGE).elf
+ifneq ($(strip $(MAX_CYCLES)),)
+NPC_RUN_ARGS += MAX_CYCLES=$(MAX_CYCLES)
+endif
+ifneq ($(strip $(DIFF)),)
+NPC_RUN_ARGS += DIFF=$(DIFF)
+endif
 
-.PHONY: insert-arg
+run: insert-arg
+	$(MAKE) -C $(NPC_HOME) run $(NPC_RUN_ARGS) BATCH=0
+
+batch: insert-arg
+	$(MAKE) -C $(NPC_HOME) run $(NPC_RUN_ARGS) BATCH=1
+
+.PHONY: insert-arg run batch

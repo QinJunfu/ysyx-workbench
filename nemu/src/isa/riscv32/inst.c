@@ -14,6 +14,7 @@
 ***************************************************************************************/
 
 #include "local-include/reg.h"
+#include "local-include/csr.h"
 #include <cpu/cpu.h>
 #include <cpu/ifetch.h>
 #include <cpu/decode.h>
@@ -71,6 +72,35 @@ static inline word_t sra32(word_t src, uint32_t shamt) {
   word_t result = src >> shamt;
   return (src & UINT32_C(0x80000000)) ?
       result | (~(word_t)0 << (32 - shamt)) : result;
+}
+
+enum {
+  CSR_OP_WRITE,
+  CSR_OP_SET,
+  CSR_OP_CLEAR,
+};
+
+static bool execute_csr(int rd, word_t addr, word_t source, int operation,
+                        bool write_enable) {
+  word_t old_value = 0;
+  if (!riscv_csr_read(addr, &old_value)) {
+    return false;
+  }
+
+  word_t write_value = old_value;
+  switch (operation) {
+    case CSR_OP_WRITE: write_value = source; break;
+    case CSR_OP_SET: write_value = old_value | source; break;
+    case CSR_OP_CLEAR: write_value = old_value & ~source; break;
+    default: return false;
+  }
+
+  if (write_enable && !riscv_csr_write(addr, write_value)) {
+    return false;
+  }
+
+  R(rd) = old_value;
+  return true;
 }
 
 static int decode_exec(Decode *s) {
@@ -149,6 +179,29 @@ static int decode_exec(Decode *s) {
   INSTPAT("0000001 ????? ????? 110 ????? 01100 11", rem    , R, R(rd) = src2 == 0 ? src1 : (word_t)(sext32(src1) % sext32(src2)));
   INSTPAT("0000001 ????? ????? 111 ????? 01100 11", remu   , R, R(rd) = src2 == 0 ? src1 : src1 % src2);
 
+  INSTPAT("??????? ????? ????? 000 ????? 00011 11", fence  , N, (void)0);
+  INSTPAT("??????? ????? ????? 001 ????? 00011 11", fence_i, N, (void)0);
+
+  INSTPAT("??????? ????? ????? 001 ????? 11100 11", csrrw, I,
+      if (!execute_csr(rd, BITS(s->isa.inst, 31, 20), src1, CSR_OP_WRITE, true)) INV(s->pc));
+  INSTPAT("??????? ????? ????? 010 ????? 11100 11", csrrs, I,
+      if (!execute_csr(rd, BITS(s->isa.inst, 31, 20), src1, CSR_OP_SET,
+                       BITS(s->isa.inst, 19, 15) != 0)) INV(s->pc));
+  INSTPAT("??????? ????? ????? 011 ????? 11100 11", csrrc, I,
+      if (!execute_csr(rd, BITS(s->isa.inst, 31, 20), src1, CSR_OP_CLEAR,
+                       BITS(s->isa.inst, 19, 15) != 0)) INV(s->pc));
+  INSTPAT("??????? ????? ????? 101 ????? 11100 11", csrrwi, N,
+      if (!execute_csr(rd, BITS(s->isa.inst, 31, 20), BITS(s->isa.inst, 19, 15),
+                       CSR_OP_WRITE, true)) INV(s->pc));
+  INSTPAT("??????? ????? ????? 110 ????? 11100 11", csrrsi, N,
+      if (!execute_csr(rd, BITS(s->isa.inst, 31, 20), BITS(s->isa.inst, 19, 15),
+                       CSR_OP_SET, BITS(s->isa.inst, 19, 15) != 0)) INV(s->pc));
+  INSTPAT("??????? ????? ????? 111 ????? 11100 11", csrrci, N,
+      if (!execute_csr(rd, BITS(s->isa.inst, 31, 20), BITS(s->isa.inst, 19, 15),
+                       CSR_OP_CLEAR, BITS(s->isa.inst, 19, 15) != 0)) INV(s->pc));
+
+  INSTPAT("0000000 00000 00000 000 00000 11100 11", ecall , N, s->dnpc = isa_raise_intr(11, s->pc));
+  INSTPAT("0011000 00010 00000 000 00000 11100 11", mret  , N, s->dnpc = cpu.mepc);
   INSTPAT("0000000 00001 00000 000 00000 11100 11", ebreak , N, NEMUTRAP(s->pc, R(10))); // R(10) is $a0
   INSTPAT("??????? ????? ????? ??? ????? ????? ??", inv    , N, INV(s->pc));
   INSTPAT_END();
@@ -160,6 +213,9 @@ static int decode_exec(Decode *s) {
 
 int isa_exec_once(Decode *s) {
   s->isa.inst = inst_fetch(&s->snpc, 4);
+  riscv_csr_begin_inst();
   trace_inst(s);
-  return decode_exec(s);
+  int result = decode_exec(s);
+  riscv_csr_finish_inst();
+  return result;
 }
