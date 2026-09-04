@@ -50,7 +50,7 @@ void init_mem() {
   Log("physical memory area [" FMT_PADDR ", " FMT_PADDR "]", PMEM_LEFT, PMEM_RIGHT);
 }
 
-word_t paddr_read(paddr_t addr, int len) {
+static word_t paddr_read_impl(paddr_t addr, int len, bool trace_mtrace) {
   word_t ret;
 
   if (likely(in_pmem(addr))) {
@@ -64,8 +64,18 @@ word_t paddr_read(paddr_t addr, int len) {
   }
 
 done:
-  IFDEF(CONFIG_MTRACE, trace_write("MTRACE R " FMT_PADDR " len = %d, data = " FMT_WORD "\n", addr, len, ret));
+  if (trace_mtrace) {
+    IFDEF(CONFIG_MTRACE, trace_write("MTRACE R " FMT_PADDR " len = %d, data = " FMT_WORD "\n", addr, len, ret));
+  }
   return ret;
+}
+
+word_t paddr_read(paddr_t addr, int len) {
+  return paddr_read_impl(addr, len, true);
+}
+
+word_t paddr_ifetch(paddr_t addr, int len) {
+  return paddr_read_impl(addr, len, false);
 }
 
 void paddr_write(paddr_t addr, int len, word_t data) {
