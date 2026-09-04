@@ -33,21 +33,14 @@ static bool g_print_step = false;
 
 void device_update();
 
-static void trace_and_difftest(Decode *_this, vaddr_t dnpc) {
-#ifdef CONFIG_ITRACE_COND
-  if (ITRACE_COND) { log_write("%s\n", _this->logbuf); }
-#endif
-  if (g_print_step) { IFDEF(CONFIG_ITRACE, puts(_this->logbuf)); }
-  IFDEF(CONFIG_DIFFTEST, difftest_step(_this->pc, dnpc));
-  IFDEF(CONFIG_WATCHPOINT, if (check_watchpoints()) nemu_state.state = NEMU_STOP;);
+bool cpu_exec_print_step(void) {
+  return g_print_step;
 }
 
-static void exec_once(Decode *s, vaddr_t pc) {
-  s->pc = pc;
-  s->snpc = pc;
-  isa_exec_once(s);
-  cpu.pc = s->dnpc;
-#ifdef CONFIG_ITRACE
+void trace_inst(Decode *s) {
+#if defined(CONFIG_ITRACE) || defined(CONFIG_IQUEUE)
+  if (s->logbuf_ready) return;
+
   char *p = s->logbuf;
   p += snprintf(p, sizeof(s->logbuf), FMT_WORD ":", s->pc);
   int ilen = s->snpc - s->pc;
@@ -70,7 +63,33 @@ static void exec_once(Decode *s, vaddr_t pc) {
   void disassemble(char *str, int size, uint64_t pc, uint8_t *code, int nbyte);
   disassemble(p, s->logbuf + sizeof(s->logbuf) - p,
       MUXDEF(CONFIG_ISA_x86, s->snpc, s->pc), (uint8_t *)&s->isa.inst, ilen);
+
+  s->logbuf_ready = true;
+  IFDEF(CONFIG_IQUEUE, iringbuf_record(s->pc, s->logbuf));
+#else
+  (void)s;
 #endif
+}
+
+static void trace_and_difftest(Decode *_this, vaddr_t dnpc) {
+#ifdef CONFIG_ITRACE_COND
+  if (ITRACE_COND) { log_write("%s\n", _this->logbuf); }
+#endif
+  if (g_print_step) { IFDEF(CONFIG_ITRACE, puts(_this->logbuf)); }
+  IFDEF(CONFIG_DIFFTEST, difftest_step(_this->pc, dnpc));
+  IFDEF(CONFIG_WATCHPOINT, if (check_watchpoints()) nemu_state.state = NEMU_STOP;);
+}
+
+static void exec_once(Decode *s, vaddr_t pc) {
+  s->pc = pc;
+  s->snpc = pc;
+#if defined(CONFIG_ITRACE) || defined(CONFIG_IQUEUE)
+  s->logbuf_ready = false;
+#endif
+  isa_exec_once(s);
+  // ISAs with a pre-execution hook have already recorded this instruction.
+  trace_inst(s);
+  cpu.pc = s->dnpc;
 }
 
 static void execute(uint64_t n) {
@@ -94,6 +113,7 @@ static void statistic() {
 }
 
 void assert_fail_msg() {
+  IFDEF(CONFIG_IQUEUE, iringbuf_display(cpu.pc));
   isa_reg_display();
   statistic();
 }
@@ -124,6 +144,11 @@ void cpu_exec(uint64_t n) {
            (nemu_state.halt_ret == 0 ? ANSI_FMT("HIT GOOD TRAP", ANSI_FG_GREEN) :
             ANSI_FMT("HIT BAD TRAP", ANSI_FG_RED))),
           nemu_state.halt_pc);
+      IFDEF(CONFIG_IQUEUE,
+        if (nemu_state.state == NEMU_ABORT || nemu_state.halt_ret != 0) {
+          iringbuf_display(nemu_state.halt_pc);
+        }
+      );
       // fall through
     case NEMU_QUIT: statistic();
   }

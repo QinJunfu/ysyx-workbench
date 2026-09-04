@@ -14,10 +14,13 @@
 ***************************************************************************************/
 
 #include <common.h>
+#include <cpu/cpu.h>
 
 extern uint64_t g_nr_guest_inst;
 
 #ifndef CONFIG_TARGET_AM
+#include <stdarg.h>
+
 FILE *log_fp = NULL;
 
 void init_log(const char *log_file) {
@@ -33,5 +36,33 @@ void init_log(const char *log_file) {
 bool log_enable() {
   return MUXDEF(CONFIG_TRACE, (g_nr_guest_inst >= CONFIG_TRACE_START) &&
          (g_nr_guest_inst <= CONFIG_TRACE_END), false);
+}
+
+void trace_write(const char *fmt, ...) {
+  bool write_log = log_enable() && log_fp != NULL;
+  bool write_stdout = cpu_exec_print_step();
+
+  if (!write_log && !write_stdout) {
+    return;
+  }
+
+  va_list ap;
+  if (write_log && log_fp != stdout) {
+    va_start(ap, fmt);
+    vfprintf(log_fp, fmt, ap);
+    fflush(log_fp);
+    va_end(ap);
+  }
+
+  if (write_stdout || (write_log && log_fp == stdout)) {
+    va_start(ap, fmt);
+    vfprintf(stdout, fmt, ap);
+    fflush(stdout);
+    va_end(ap);
+  }
+}
+#else
+void trace_write(const char *fmt, ...) {
+  (void)fmt;
 }
 #endif

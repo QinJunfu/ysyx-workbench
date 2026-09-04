@@ -30,11 +30,24 @@ typedef struct {
 
 extern NEMUState nemu_state;
 
+// ----------- instruction ring buffer -----------
+
+void iringbuf_record(vaddr_t pc, const char *logbuf);
+void iringbuf_display(vaddr_t fault_pc);
+
 // ----------- timer -----------
 
 uint64_t get_time();
 
+// ----------- ftrace -----------
+
+void init_ftrace(const char *elf_file);
+void ftrace(vaddr_t pc, vaddr_t target, uint32_t inst, int rd, int rs1,
+    word_t imm);
+
 // ----------- log -----------
+
+void trace_write(const char *fmt, ...);
 
 #define ANSI_FG_BLACK   "\33[1;30m"
 #define ANSI_FG_RED     "\33[1;31m"

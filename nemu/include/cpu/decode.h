@@ -23,8 +23,13 @@ typedef struct Decode {
   vaddr_t snpc; // static next pc
   vaddr_t dnpc; // dynamic next pc
   ISADecodeInfo isa;
-  IFDEF(CONFIG_ITRACE, char logbuf[128]);
+#if defined(CONFIG_ITRACE) || defined(CONFIG_IQUEUE)
+  char logbuf[128];
+  bool logbuf_ready;
+#endif
 } Decode;
+
+void trace_inst(Decode *s);
 
 // --- pattern matching mechanism ---
 __attribute__((always_inline))
