@@ -1,68 +1,56 @@
 package gcd
 
 import chisel3._
-import chisel3.util.Decoupled
 
-class GcdInputBundle(val w: Int) extends Bundle {
-  val value1 = UInt(w.W)
-  val value2 = UInt(w.W)
-}
-
-class GcdOutputBundle(val w: Int) extends Bundle {
-  val value1 = UInt(w.W)
-  val value2 = UInt(w.W)
-  val gcd    = UInt(w.W)
-}
-
-/** Compute Gcd using subtraction method. Subtracts the smaller from the larger until register y is zero. value input
-  * register x is then the Gcd. Unless first input is zero then the Gcd is y. Can handle stalls on the producer or
-  * consumer side
+/** GCD calculator with an explicit valid/ready/bits interface.
+  *
+  * One transaction is accepted at a time. Once a result is available, all output fields remain stable until the
+  * consumer accepts it.
   */
 class DecoupledGcd(width: Int) extends Module {
-  val input  = IO(Flipped(Decoupled(new GcdInputBundle(width))))
-  val output = IO(Decoupled(new GcdOutputBundle(width)))
+  val input  = IO(new GcdInputPort(width))
+  val output = IO(new GcdOutputPort(width))
 
-  val xInitial    = Reg(UInt())
-  val yInitial    = Reg(UInt())
-  val x           = Reg(UInt())
-  val y           = Reg(UInt())
+  val xInitial    = RegInit(0.U(width.W))
+  val yInitial    = RegInit(0.U(width.W))
+  val x           = RegInit(0.U(width.W))
+  val y           = RegInit(0.U(width.W))
+  val gcdValue    = RegInit(0.U(width.W))
   val busy        = RegInit(false.B)
   val resultValid = RegInit(false.B)
 
-  input.ready  := !busy
-  output.valid := resultValid
-  output.bits  := DontCare
+  input.ready        := !busy
+  output.valid       := resultValid
+  output.bits.value1 := xInitial
+  output.bits.value2 := yInitial
+  output.bits.gcd    := gcdValue
 
-  when(busy) {
-    when(x > y) {
+  when(!busy) {
+    when(input.valid && input.ready) {
+      x           := input.bits.value1
+      y           := input.bits.value2
+      xInitial    := input.bits.value1
+      yInitial    := input.bits.value2
+      busy        := true.B
+      resultValid := false.B
+    }
+  }.elsewhen(!resultValid) {
+    when(x === 0.U || y === 0.U) {
+      when(x === 0.U) {
+        gcdValue := y
+      }.otherwise {
+        gcdValue := x
+      }
+      resultValid := true.B
+    }.elsewhen(x > y) {
       x := x - y
     }.otherwise {
       y := y - x
     }
-    when(x === 0.U || y === 0.U) {
-      when(x === 0.U) {
-        output.bits.gcd := y
-      }.otherwise {
-        output.bits.gcd := x
-      }
-
-      output.bits.value1 := xInitial
-      output.bits.value2 := yInitial
-      resultValid        := true.B
-
-      when(output.ready && resultValid) {
-        busy        := false.B
-        resultValid := false.B
-      }
-    }
   }.otherwise {
-    when(input.valid) {
-      val bundle = input.deq()
-      x        := bundle.value1
-      y        := bundle.value2
-      xInitial := bundle.value1
-      yInitial := bundle.value2
-      busy     := true.B
+    when(output.ready) {
+      busy        := false.B
+      resultValid := false.B
     }
   }
 }

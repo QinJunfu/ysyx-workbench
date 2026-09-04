@@ -1,6 +1,7 @@
 BUILD_DIR := build
 RTL_DIR := $(BUILD_DIR)/rtl
 OBJ_DIR := $(BUILD_DIR)/obj_dir
+C_OBJ_DIR := $(BUILD_DIR)/cobj
 TOP_MODULE := NpcTop
 SIM := $(OBJ_DIR)/V$(TOP_MODULE)
 VERILATOR_LOG := $(BUILD_DIR)/.verilator.log
@@ -34,12 +35,20 @@ endif
 endif
 
 SCALA_SRCS := $(sort $(shell find src -type f -name '*.scala'))
-CSRC := $(sort $(shell find csrc -type f \( -name '*.c' -o -name '*.cc' -o -name '*.cpp' \)))
-RTL_SV := $(RTL_DIR)/NPC.sv
+C_SRCS := $(sort $(shell find csrc -type f -name '*.c'))
+CXX_SRCS := $(sort $(shell find csrc -type f \( -name '*.cc' -o -name '*.cpp' \)))
+C_HEADERS := $(sort $(shell find csrc -type f -name '*.h'))
+C_OBJS := $(patsubst csrc/%.c,$(C_OBJ_DIR)/%.o,$(C_SRCS))
+C_DEPS := $(C_OBJS:.o=.d)
+RTL_TOP := $(RTL_DIR)/NPC.sv
+RTL_FILELIST := $(RTL_DIR)/filelist.f
+RTL_SV = $(addprefix $(RTL_DIR)/,$(shell sed -e '/^[[:space:]]*$$/d' -e '/^[[:space:]]*#/d' $(RTL_FILELIST) 2>/dev/null))
 VSRC := vsrc/NpcTop.sv
 
 CAPSTONE_CFLAGS ?= $(shell pkg-config --cflags capstone 2>/dev/null)
 CAPSTONE_LIBS ?= $(shell pkg-config --libs capstone 2>/dev/null)
+CC ?= cc
+CFLAGS ?= -std=c99 -O2 -Wall -Wextra -Wpedantic
 CXXFLAGS ?= -std=c++20 -O2 -Wall -Wextra
 
 IMAGE ?=
@@ -70,21 +79,34 @@ $(RTL_DIR):
 $(OBJ_DIR):
 	@mkdir -p $@
 
-$(RTL_SV): $(SCALA_SRCS) build.mill .mill-version | $(RTL_DIR)
+$(C_OBJ_DIR):
+	@mkdir -p $@
+
+$(C_OBJ_DIR)/%.o: csrc/%.c $(C_HEADERS) $(CONFIG_HEADER) | $(C_OBJ_DIR)
+	@mkdir -p $(dir $@)
+	@$(CC) $(CFLAGS) $(CAPSTONE_CFLAGS) -I$(abspath include) -I$(abspath csrc/include) \
+		-DNPC_CONFIG_ROOT=\"$(abspath .)\" -MMD -MP -c $< -o $@
+
+$(RTL_TOP): $(SCALA_SRCS) build.mill .mill-version | $(RTL_DIR)
 	$(MILL) -i runMain Elaborate --target-dir $(RTL_DIR)
 	@test -f $@
+	@test -f $(RTL_FILELIST)
 
-verilog: $(RTL_SV)
+$(RTL_FILELIST): $(RTL_TOP)
+	@test -f $@
+
+verilog: $(RTL_TOP)
 	$(call git_commit, "generate verilog")
 
-$(SIM): $(RTL_SV) $(VSRC) $(CSRC) $(CONFIG_HEADER) | $(OBJ_DIR)
+$(SIM): Makefile $(RTL_FILELIST) $(VSRC) $(CXX_SRCS) $(C_OBJS) $(C_HEADERS) $(CONFIG_HEADER) | $(OBJ_DIR)
 	@$(foreach source,$(RTL_SV) $(VSRC),printf '+V %s\n' '$(notdir $(source))';)
-	@$(foreach source,$(CSRC),printf '+CC %s\n' '$(notdir $(source))';)
+	@$(foreach source,$(C_SRCS),printf '+C %s\n' '$(notdir $(source))';)
+	@$(foreach source,$(CXX_SRCS),printf '+CC %s\n' '$(notdir $(source))';)
 	@$(VERILATOR) --cc --exe --build --trace --Wno-fatal \
 		--top-module $(TOP_MODULE) --Mdir $(OBJ_DIR) \
-		-CFLAGS "$(CXXFLAGS) $(CAPSTONE_CFLAGS) -I$(abspath include) -DNPC_CONFIG_ROOT=\\\"$(abspath .)\\\"" \
-		-LDFLAGS "$(CAPSTONE_LIBS) -ldl" \
-		$(RTL_SV) $(VSRC) $(CSRC) >$(VERILATOR_LOG) 2>&1 || { cat $(VERILATOR_LOG); exit 1; }
+		-CFLAGS "$(CXXFLAGS) $(CAPSTONE_CFLAGS) -I$(abspath include) -I$(abspath csrc/include) -DNPC_CONFIG_ROOT=\\\"$(abspath .)\\\"" \
+		-LDFLAGS "$(abspath $(C_OBJS)) $(CAPSTONE_LIBS) -ldl" \
+		$(RTL_SV) $(VSRC) $(CXX_SRCS) >$(VERILATOR_LOG) 2>&1 || { cat $(VERILATOR_LOG); exit 1; }
 	@grep -E '^- V e r i l a t i o n +R e p o r t:|^- Verilator:' $(VERILATOR_LOG) || true
 	@rm -f $(VERILATOR_LOG)
 
@@ -118,5 +140,7 @@ clean:
 	-rm -rf $(BUILD_DIR)
 
 .PHONY: all test ref verilog sim run help reformat checkformat bsp idea clean
+
+-include $(C_DEPS)
 
 -include ../Makefile
