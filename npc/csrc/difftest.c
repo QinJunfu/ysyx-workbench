@@ -128,3 +128,32 @@ int npc_difftest_step(NpcDifftest *difftest, const NpcCommit *dut,
   }
   return 1;
 }
+
+void npc_difftest_sync_mmio(NpcDifftest *difftest, const NpcCommit *dut) {
+  NpcNemuState reference;
+  uint32_t nop;
+  uint32_t instruction;
+  unsigned int index;
+
+  if (!npc_difftest_enabled(difftest)) {
+    return;
+  }
+
+  /*
+   * The reference has no matching host device.  Execute a NOP at the same
+   * PC so its instruction counters advance, then restore the image before
+   * copying the DUT-visible state into it.
+   */
+  nop = UINT32_C(0x00000013);
+  instruction = dut->inst;
+  difftest->memcpy_fn(dut->pc, &nop, sizeof(nop), true);
+  difftest->exec_fn(1);
+  difftest->memcpy_fn(dut->pc, &instruction, sizeof(instruction), true);
+
+  memset(&reference, 0, sizeof(reference));
+  for (index = 0; index < NPC_GPR_COUNT; ++index) {
+    reference.gpr[index] = dut->gpr[index];
+  }
+  reference.pc = dut->dnpc;
+  difftest->regcpy_fn(&reference, true);
+}

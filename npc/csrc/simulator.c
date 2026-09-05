@@ -6,6 +6,7 @@
 
 #include <generated/autoconf.h>
 
+#include "device.h"
 #include "difftest.h"
 #include "dpi.h"
 #include "expr.h"
@@ -27,6 +28,7 @@ typedef struct {
 struct NpcSimulator {
   NpcOptions options;
   NpcMemory *memory;
+  NpcDevices devices;
   NpcTrace *trace;
   NpcDifftest *difftest;
   NpcVerilatorHost *host;
@@ -298,6 +300,7 @@ int npc_simulator_initialize(NpcSimulator *simulator, int argc, char **argv,
     return 0;
   }
 
+  npc_devices_init(&simulator->devices);
   memset(&simulator->state, 0, sizeof(simulator->state));
   simulator->state.pc = NPC_PMEM_BASE;
   simulator->state.dnpc = NPC_PMEM_BASE;
@@ -331,6 +334,9 @@ uint32_t npc_simulator_dpi_read(NpcSimulator *simulator, uint32_t address) {
   char error[NPC_ERROR_SIZE];
 
   value = 0;
+  if (npc_devices_read(&simulator->devices, address, &value)) {
+    return value;
+  }
   if (!npc_memory_read_word(simulator->memory, address, &value, error, sizeof(error))) {
     if (simulator->reset_active) {
       return 0;
@@ -344,6 +350,9 @@ void npc_simulator_dpi_write(NpcSimulator *simulator, uint32_t address, uint32_t
                              uint8_t mask) {
   char error[NPC_ERROR_SIZE];
 
+  if (npc_devices_write(&simulator->devices, address, value, mask)) {
+    return;
+  }
   if (!npc_memory_write_word_masked(simulator->memory, address, value, mask, error,
                                     sizeof(error))) {
     npc_simulator_fatal(simulator, error);
@@ -361,10 +370,15 @@ void npc_simulator_dpi_commit(NpcSimulator *simulator, const NpcCommit *commit) 
   simulator->instructions += 1;
   npc_trace_record(simulator->trace, &simulator->state);
   npc_simulator_check_watchpoints(simulator);
-  if (!simulator->state.invalid && npc_difftest_enabled(simulator->difftest) &&
-      !npc_difftest_step(simulator->difftest, &simulator->state, error, sizeof(error))) {
-    npc_simulator_fatal(simulator, error);
-    npc_trace_dump_recent(simulator->trace);
+  if (!simulator->state.invalid && npc_difftest_enabled(simulator->difftest)) {
+    if (simulator->state.mem_valid &&
+        npc_devices_accesses_mmio(simulator->state.mem_addr, simulator->state.mem_mask)) {
+      npc_difftest_sync_mmio(simulator->difftest, &simulator->state);
+    } else if (!npc_difftest_step(simulator->difftest, &simulator->state, error,
+                                  sizeof(error))) {
+      npc_simulator_fatal(simulator, error);
+      npc_trace_dump_recent(simulator->trace);
+    }
   }
   if (simulator->state.invalid) {
     char message[NPC_ERROR_SIZE];

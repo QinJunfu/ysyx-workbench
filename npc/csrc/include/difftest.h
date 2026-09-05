@@ -21,6 +21,7 @@ int npc_difftest_initialize(NpcDifftest *difftest, const char *path,
 int npc_difftest_enabled(const NpcDifftest *difftest);
 int npc_difftest_step(NpcDifftest *difftest, const NpcCommit *dut,
                       char *error, size_t error_size);
+void npc_difftest_sync_mmio(NpcDifftest *difftest, const NpcCommit *dut);
 
 #ifdef __cplusplus
 }

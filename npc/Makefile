@@ -102,6 +102,8 @@ $(SIM): Makefile $(RTL_FILELIST) $(VSRC) $(CXX_SRCS) $(C_OBJS) $(C_HEADERS) $(CO
 	@$(foreach source,$(RTL_SV) $(VSRC),printf '+V %s\n' '$(notdir $(source))';)
 	@$(foreach source,$(C_SRCS),printf '+C %s\n' '$(notdir $(source))';)
 	@$(foreach source,$(CXX_SRCS),printf '+CC %s\n' '$(notdir $(source))';)
+	@# C objects are linker inputs, not prerequisites in Verilator's generated Makefile.
+	@rm -f $(SIM)
 	@$(VERILATOR) --cc --exe --build --trace --Wno-fatal \
 		--top-module $(TOP_MODULE) --Mdir $(OBJ_DIR) \
 		-CFLAGS "$(CXXFLAGS) $(CAPSTONE_CFLAGS) -I$(abspath include) -I$(abspath csrc/include) -DNPC_CONFIG_ROOT=\\\"$(abspath .)\\\"" \
