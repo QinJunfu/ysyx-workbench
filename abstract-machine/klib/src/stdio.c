@@ -15,7 +15,13 @@ static void emit_char(FormatOutput *output, char ch) {
   output->count++;
 }
 
-static int decimal_digits(unsigned int value) {
+typedef enum {
+  FORMAT_LENGTH_NONE,
+  FORMAT_LENGTH_LONG,
+  FORMAT_LENGTH_LONG_LONG,
+} FormatLength;
+
+static int decimal_digits(unsigned long long value) {
   int digits = 1;
 
   while (value >= 10) {
@@ -25,7 +31,7 @@ static int decimal_digits(unsigned int value) {
   return digits;
 }
 
-static int hexadecimal_digits(unsigned int value) {
+static int hexadecimal_digits(unsigned long long value) {
   int digits = 1;
 
   while (value >= 16) {
@@ -35,22 +41,22 @@ static int hexadecimal_digits(unsigned int value) {
   return digits;
 }
 
-static void emit_unsigned(FormatOutput *output, unsigned int value, int base) {
+static void emit_unsigned(FormatOutput *output, unsigned long long value, int base) {
   static const char digits[] = "0123456789abcdef";
-  unsigned int divisor = 1;
+  unsigned long long divisor = 1;
 
-  while (value / divisor >= (unsigned int)base) {
-    divisor *= (unsigned int)base;
+  while (value / divisor >= (unsigned long long)base) {
+    divisor *= (unsigned long long)base;
   }
 
   do {
     emit_char(output, digits[value / divisor]);
     value %= divisor;
-    divisor /= (unsigned int)base;
+    divisor /= (unsigned long long)base;
   } while (divisor != 0);
 }
 
-static void emit_number(FormatOutput *output, unsigned int value, int base,
+static void emit_number(FormatOutput *output, unsigned long long value, int base,
                         bool negative, int width, bool zero_padded) {
   int digits = base == 10 ? decimal_digits(value) : hexadecimal_digits(value);
   int length = digits + (negative ? 1 : 0);
@@ -96,7 +102,18 @@ static int format(FormatOutput *output, const char *fmt, va_list ap) {
       width = width * 10 + (*fmt++ - '0');
     }
 
-    switch (*fmt++) {
+    FormatLength length = FORMAT_LENGTH_NONE;
+    if (*fmt == 'l') {
+      fmt++;
+      length = FORMAT_LENGTH_LONG;
+      if (*fmt == 'l') {
+        fmt++;
+        length = FORMAT_LENGTH_LONG_LONG;
+      }
+    }
+
+    char specifier = *fmt++;
+    switch (specifier) {
       case '%':
         emit_char(output, '%');
         break;
@@ -114,15 +131,28 @@ static int format(FormatOutput *output, const char *fmt, va_list ap) {
         emit_char(output, (char)va_arg(ap, int));
         break;
       case 'd': {
-        int value = va_arg(ap, int);
+        long long value;
+        switch (length) {
+          case FORMAT_LENGTH_NONE: value = va_arg(ap, int); break;
+          case FORMAT_LENGTH_LONG: value = va_arg(ap, long); break;
+          case FORMAT_LENGTH_LONG_LONG: value = va_arg(ap, long long); break;
+        }
         bool negative = value < 0;
-        unsigned int magnitude = negative ? 0u - (unsigned int)value : (unsigned int)value;
+        unsigned long long magnitude = negative ? 0ull - (unsigned long long)value : (unsigned long long)value;
         emit_number(output, magnitude, 10, negative, width, zero_padded);
         break;
       }
-      case 'x':
-        emit_number(output, va_arg(ap, unsigned int), 16, false, width, zero_padded);
+      case 'u':
+      case 'x': {
+        unsigned long long value;
+        switch (length) {
+          case FORMAT_LENGTH_NONE: value = va_arg(ap, unsigned int); break;
+          case FORMAT_LENGTH_LONG: value = va_arg(ap, unsigned long); break;
+          case FORMAT_LENGTH_LONG_LONG: value = va_arg(ap, unsigned long long); break;
+        }
+        emit_number(output, value, specifier == 'u' ? 10 : 16, false, width, zero_padded);
         break;
+      }
       default:
         panic("Unsupported conversion specifier");
     }
@@ -140,6 +170,21 @@ static void string_output(void *context, char ch) {
   char **out = context;
   **out = ch;
   (*out)++;
+}
+
+typedef struct {
+  char *out;
+  size_t size;
+  size_t count;
+} BoundedStringOutput;
+
+static void bounded_string_output(void *context, char ch) {
+  BoundedStringOutput *output = context;
+
+  if (output->count + 1 < output->size) {
+    output->out[output->count] = ch;
+  }
+  output->count++;
 }
 
 int vprintf(const char *fmt, va_list ap) {
@@ -180,11 +225,30 @@ int sprintf(char *out, const char *fmt, ...) {
 }
 
 int snprintf(char *out, size_t n, const char *fmt, ...) {
-  panic("Not implemented");
+  va_list ap;
+  va_start(ap, fmt);
+  int result = vsnprintf(out, n, fmt, ap);
+  va_end(ap);
+  return result;
 }
 
 int vsnprintf(char *out, size_t n, const char *fmt, va_list ap) {
-  panic("Not implemented");
+  BoundedStringOutput buffer = {
+    .out = out,
+    .size = n,
+    .count = 0,
+  };
+  FormatOutput output = {
+    .putc = bounded_string_output,
+    .context = &buffer,
+    .count = 0,
+  };
+  int result = format(&output, fmt, ap);
+
+  if (n != 0) {
+    out[buffer.count < n ? buffer.count : n - 1] = '\0';
+  }
+  return result;
 }
 
 int __am_vsscanf_internal(const char *str, const char **end_pstr, const char *fmt, va_list ap) {
