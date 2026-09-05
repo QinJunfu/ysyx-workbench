@@ -2,68 +2,173 @@
 
 #if !defined(__ISA_NATIVE__) || defined(__NATIVE_USE_KLIB__)
 
-int printf(const char *fmt, ...) {
-  panic("Not implemented");
+typedef void (*format_putc_t)(void *context, char ch);
+
+typedef struct {
+  format_putc_t putc;
+  void *context;
+  int count;
+} FormatOutput;
+
+static void emit_char(FormatOutput *output, char ch) {
+  output->putc(output->context, ch);
+  output->count++;
 }
 
-int vprintf(const char *fmt, va_list ap) {
-  panic("Not implemented");
+static int decimal_digits(unsigned int value) {
+  int digits = 1;
+
+  while (value >= 10) {
+    value /= 10;
+    digits++;
+  }
+  return digits;
 }
 
-static char *write_decimal(char *out, int value) {
-  unsigned int magnitude;
-  char digits[sizeof(unsigned int) * 3];
-  int count = 0;
+static int hexadecimal_digits(unsigned int value) {
+  int digits = 1;
 
-  if (value < 0) {
-    *out++ = '-';
-    magnitude = 0u - (unsigned int)value;
-  } else {
-    magnitude = (unsigned int)value;
+  while (value >= 16) {
+    value /= 16;
+    digits++;
+  }
+  return digits;
+}
+
+static void emit_unsigned(FormatOutput *output, unsigned int value, int base) {
+  static const char digits[] = "0123456789abcdef";
+  unsigned int divisor = 1;
+
+  while (value / divisor >= (unsigned int)base) {
+    divisor *= (unsigned int)base;
   }
 
   do {
-    digits[count++] = '0' + magnitude % 10;
-    magnitude /= 10;
-  } while (magnitude != 0);
-
-  while (count > 0) {
-    *out++ = digits[--count];
-  }
-  return out;
+    emit_char(output, digits[value / divisor]);
+    value %= divisor;
+    divisor /= (unsigned int)base;
+  } while (divisor != 0);
 }
 
-int vsprintf(char *out, const char *fmt, va_list ap) {
-  char *start = out;
+static void emit_number(FormatOutput *output, unsigned int value, int base,
+                        bool negative, int width, bool zero_padded) {
+  int digits = base == 10 ? decimal_digits(value) : hexadecimal_digits(value);
+  int length = digits + (negative ? 1 : 0);
 
+  if (!zero_padded) {
+    while (length < width) {
+      emit_char(output, ' ');
+      length++;
+    }
+  }
+
+  if (negative) {
+    emit_char(output, '-');
+  }
+
+  if (zero_padded) {
+    while (length < width) {
+      emit_char(output, '0');
+      length++;
+    }
+  }
+
+  emit_unsigned(output, value, base);
+}
+
+static int format(FormatOutput *output, const char *fmt, va_list ap) {
   while (*fmt != '\0') {
     if (*fmt != '%') {
-      *out++ = *fmt++;
+      emit_char(output, *fmt++);
       continue;
     }
 
     fmt++;
+    bool zero_padded = false;
+    int width = 0;
+
+    if (*fmt == '0') {
+      zero_padded = true;
+      fmt++;
+    }
+
+    while (*fmt >= '0' && *fmt <= '9') {
+      width = width * 10 + (*fmt++ - '0');
+    }
+
     switch (*fmt++) {
       case '%':
-        *out++ = '%';
+        emit_char(output, '%');
         break;
       case 's': {
         const char *str = va_arg(ap, const char *);
+        if (str == NULL) {
+          str = "(null)";
+        }
         while (*str != '\0') {
-          *out++ = *str++;
+          emit_char(output, *str++);
         }
         break;
       }
-      case 'd':
-        out = write_decimal(out, va_arg(ap, int));
+      case 'c':
+        emit_char(output, (char)va_arg(ap, int));
+        break;
+      case 'd': {
+        int value = va_arg(ap, int);
+        bool negative = value < 0;
+        unsigned int magnitude = negative ? 0u - (unsigned int)value : (unsigned int)value;
+        emit_number(output, magnitude, 10, negative, width, zero_padded);
+        break;
+      }
+      case 'x':
+        emit_number(output, va_arg(ap, unsigned int), 16, false, width, zero_padded);
         break;
       default:
         panic("Unsupported conversion specifier");
     }
   }
 
-  *out = '\0';
-  return out - start;
+  return output->count;
+}
+
+static void putch_output(void *context, char ch) {
+  (void)context;
+  putch(ch);
+}
+
+static void string_output(void *context, char ch) {
+  char **out = context;
+  **out = ch;
+  (*out)++;
+}
+
+int vprintf(const char *fmt, va_list ap) {
+  FormatOutput output = {
+    .putc = putch_output,
+    .context = NULL,
+    .count = 0,
+  };
+  return format(&output, fmt, ap);
+}
+
+int printf(const char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  int result = vprintf(fmt, ap);
+  va_end(ap);
+  return result;
+}
+
+int vsprintf(char *out, const char *fmt, va_list ap) {
+  char *cursor = out;
+  FormatOutput output = {
+    .putc = string_output,
+    .context = &cursor,
+    .count = 0,
+  };
+  int result = format(&output, fmt, ap);
+  *cursor = '\0';
+  return result;
 }
 
 int sprintf(char *out, const char *fmt, ...) {
