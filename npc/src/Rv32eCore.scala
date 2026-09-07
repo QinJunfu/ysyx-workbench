@@ -2,137 +2,93 @@ package npc
 
 import chisel3._
 
-/** Single-cycle RV32E core.
+/**
+  * Single-cycle RV32E core organized as IFU, IDU, EXU, LSU, and WBU.
   *
-  * This module owns only the architectural PC and halt state. Register state, CSR state, instruction decode, and
-  * aligned memory transactions each live in their own module so their responsibilities remain visible at the top level.
+  * The five units are connected only by combinational signals. IFU's PC and
+  * WBU's register/CSR files are the architectural state updated at the clock
+  * edge, so one active clock cycle still retires exactly one instruction.
   */
 class Rv32eCore(val resetPc: BigInt = BigInt("80000000", 16)) extends Module {
   require(resetPc >= 0 && resetPc < (BigInt(1) << 32), "resetPc must fit in 32 bits")
 
   val io = IO(new Rv32eCoreIO)
 
-  val pc     = RegInit(resetPc.U(32.W))
-  val halted = RegInit(false.B)
+  val ifu = Module(new IFU(resetPc))
+  val idu = Module(new IDU)
+  val exu = Module(new EXU)
+  val lsu = Module(new LSU)
+  val wbu = Module(new WBU(resetPc))
 
-  val registerFile    = Module(new RegisterFile)
-  val csrFile         = Module(new CsrFile(resetPc))
-  val instructionUnit = Module(new InstructionUnit)
-  val loadStoreUnit   = Module(new LoadStoreUnit)
+  ifu.io.imemData := io.imemData
+  ifu.io.nextPc   := wbu.io.nextPc
+  ifu.io.halt     := wbu.io.halt
 
-  // Read register indices originate in the instruction decoder.
-  registerFile.io.rs1Index := instructionUnit.io.rs1Index
-  registerFile.io.rs2Index := instructionUnit.io.rs2Index
-  registerFile.io.rdIndex  := instructionUnit.io.rdIndex
+  idu.io.pc   := ifu.io.pc
+  idu.io.inst := ifu.io.inst
 
-  // Feed current architectural state into the instruction decoder.
-  instructionUnit.io.pc           := pc
-  instructionUnit.io.inst         := io.imemData
-  instructionUnit.io.rs1Value     := registerFile.io.rs1Data
-  instructionUnit.io.rs2Value     := registerFile.io.rs2Data
-  instructionUnit.io.csrReadData  := csrFile.io.readData
-  instructionUnit.io.csrSupported := csrFile.io.readSupported
-  instructionUnit.io.mtvec        := csrFile.io.mtvec
-  instructionUnit.io.mepc         := csrFile.io.mepc
+  wbu.io.active  := ifu.io.active
+  wbu.io.decoded := idu.io.decoded
+  wbu.io.exu     := exu.io.result
+  wbu.io.lsu     := lsu.io.result
 
-  val badRegister      = (instructionUnit.io.usesRs1 && !registerFile.io.rs1Valid) ||
-    (instructionUnit.io.usesRs2 && !registerFile.io.rs2Valid) ||
-    (instructionUnit.io.writesRd && !registerFile.io.rdValid)
-  val effectiveInvalid = instructionUnit.io.illegal || badRegister
-  val validLoad        = instructionUnit.io.isLoad && !effectiveInvalid
-  val validStore       = instructionUnit.io.isStore && !effectiveInvalid
-  val validCsrWrite    = instructionUnit.io.csrWriteEnable && !effectiveInvalid
-  val commitGprWrite   = instructionUnit.io.writeGpr && !effectiveInvalid &&
-    registerFile.io.rdValid && instructionUnit.io.rdIndex =/= 0.U
+  exu.io.decoded      := idu.io.decoded
+  exu.io.rs1Data      := wbu.io.rs1Data
+  exu.io.rs2Data      := wbu.io.rs2Data
+  exu.io.csrReadData  := wbu.io.csrReadData
+  exu.io.csrSupported := wbu.io.csrSupported
+  exu.io.mtvec        := wbu.io.mtvec
+  exu.io.mepc         := wbu.io.mepc
 
-  // The load/store unit is combinational and returns split bus transfers.
-  loadStoreUnit.io.rawLoad    := instructionUnit.io.isLoad
-  loadStoreUnit.io.rawStore   := instructionUnit.io.isStore
-  loadStoreUnit.io.loadValid  := validLoad
-  loadStoreUnit.io.storeValid := validStore
-  loadStoreUnit.io.funct3     := instructionUnit.io.funct3
-  loadStoreUnit.io.address    := instructionUnit.io.memoryAddr
-  loadStoreUnit.io.storeData  := registerFile.io.rs2Data
-  loadStoreUnit.io.readData0  := io.dmemRdata
-  loadStoreUnit.io.readData1  := io.dmemRdata2
-  instructionUnit.io.loadData := loadStoreUnit.io.loadData
+  lsu.io.decoded    := idu.io.decoded
+  lsu.io.address    := exu.io.result.memoryAddr
+  lsu.io.storeData  := wbu.io.rs2Data
+  lsu.io.loadValid  := wbu.io.loadValid
+  lsu.io.storeValid := wbu.io.storeValid
+  lsu.io.readData0  := io.dmemRdata
+  lsu.io.readData1  := io.dmemRdata2
 
-  // Register writes are committed only while the core is running.
-  registerFile.io.writeEnable := !halted && commitGprWrite
-  registerFile.io.writeData   := instructionUnit.io.writeData
+  io.imemAddr        := ifu.io.imemAddr
+  io.dmemAddr        := lsu.io.result.alignedAddress
+  io.dmemAddr2       := lsu.io.result.address2
+  io.dmemReadValid   := lsu.io.result.read0Valid
+  io.dmemReadValid2  := lsu.io.result.read1Valid
+  io.dmemWrite0Valid := lsu.io.result.write0Valid
+  io.dmemWrite0Addr  := lsu.io.result.alignedAddress
+  io.dmemWrite0Data  := lsu.io.result.write0Data
+  io.dmemWrite0Mask  := lsu.io.result.write0Mask
+  io.dmemWrite1Valid := lsu.io.result.write1Valid
+  io.dmemWrite1Addr  := lsu.io.result.address2
+  io.dmemWrite1Data  := lsu.io.result.write1Data
+  io.dmemWrite1Mask  := lsu.io.result.write1Mask
 
-  // CSR writes and counters share the same retirement boundary as the PC.
-  csrFile.io.readAddress        := instructionUnit.io.csrAddress
-  csrFile.io.active             := !halted
-  csrFile.io.retiredInstruction := !effectiveInvalid
-  csrFile.io.writeEnable        := validCsrWrite
-  csrFile.io.writeAddress       := instructionUnit.io.csrAddress
-  csrFile.io.writeData          := instructionUnit.io.csrWriteData
-  csrFile.io.ecall              := instructionUnit.io.isEcall && !effectiveInvalid
-  csrFile.io.ecallPc            := pc
+  io.memTraceValid := wbu.io.retire.memTraceValid
+  io.memTraceWrite := wbu.io.retire.memTraceWrite
+  io.memTraceAddr  := wbu.io.retire.memTraceAddr
+  io.memTraceData  := wbu.io.retire.memTraceData
+  io.memTraceMask  := wbu.io.retire.memTraceMask
 
-  val haltEvent = !halted && (instructionUnit.io.isEbreak || effectiveInvalid)
-  val traceData = Wire(UInt(32.W))
-  val haltCode  = Wire(UInt(32.W))
-  traceData := loadStoreUnit.io.loadData
-  haltCode  := 0.U(32.W)
-  when(validStore) {
-    traceData := registerFile.io.rs2Data
-  }
-  when(effectiveInvalid) {
-    haltCode := 1.U(32.W)
-  }.elsewhen(instructionUnit.io.isEbreak) {
-    haltCode := registerFile.io.currentValues(10)
-  }
-
-  io.imemAddr        := pc
-  io.dmemAddr        := loadStoreUnit.io.alignedAddress
-  io.dmemAddr2       := loadStoreUnit.io.address2
-  io.dmemReadValid   := loadStoreUnit.io.read0Valid
-  io.dmemReadValid2  := loadStoreUnit.io.read1Valid
-  io.dmemWrite0Valid := loadStoreUnit.io.write0Valid
-  io.dmemWrite0Addr  := loadStoreUnit.io.alignedAddress
-  io.dmemWrite0Data  := loadStoreUnit.io.write0Data
-  io.dmemWrite0Mask  := loadStoreUnit.io.write0Mask
-  io.dmemWrite1Valid := loadStoreUnit.io.write1Valid
-  io.dmemWrite1Addr  := loadStoreUnit.io.address2
-  io.dmemWrite1Data  := loadStoreUnit.io.write1Data
-  io.dmemWrite1Mask  := loadStoreUnit.io.write1Mask
-
-  io.memTraceValid := validLoad || validStore
-  io.memTraceWrite := validStore
-  io.memTraceAddr  := instructionUnit.io.memoryAddr
-  io.memTraceData  := traceData
-  io.memTraceMask  := loadStoreUnit.io.logicalMask
-
-  io.retireValid := !halted
-  io.retirePc    := pc
-  io.retireInst  := io.imemData
-  io.retireDnPc  := instructionUnit.io.nextPc
-  io.retireGpr0  := registerFile.io.retireValues(0)
-  io.retireGpr1  := registerFile.io.retireValues(1)
-  io.retireGpr2  := registerFile.io.retireValues(2)
-  io.retireGpr3  := registerFile.io.retireValues(3)
-  io.retireGpr4  := registerFile.io.retireValues(4)
-  io.retireGpr5  := registerFile.io.retireValues(5)
-  io.retireGpr6  := registerFile.io.retireValues(6)
-  io.retireGpr7  := registerFile.io.retireValues(7)
-  io.retireGpr8  := registerFile.io.retireValues(8)
-  io.retireGpr9  := registerFile.io.retireValues(9)
-  io.retireGpr10 := registerFile.io.retireValues(10)
-  io.retireGpr11 := registerFile.io.retireValues(11)
-  io.retireGpr12 := registerFile.io.retireValues(12)
-  io.retireGpr13 := registerFile.io.retireValues(13)
-  io.retireGpr14 := registerFile.io.retireValues(14)
-  io.retireGpr15 := registerFile.io.retireValues(15)
-  io.halt        := haltEvent
-  io.haltCode    := haltCode
-  io.invalid     := !halted && effectiveInvalid
-
-  when(!halted) {
-    pc := instructionUnit.io.nextPc
-    when(haltEvent) {
-      halted := true.B
-    }
-  }
+  io.retireValid := wbu.io.retire.valid
+  io.retirePc    := wbu.io.retire.pc
+  io.retireInst  := wbu.io.retire.inst
+  io.retireDnPc  := wbu.io.retire.nextPc
+  io.retireGpr0  := wbu.io.retire.gprs(0)
+  io.retireGpr1  := wbu.io.retire.gprs(1)
+  io.retireGpr2  := wbu.io.retire.gprs(2)
+  io.retireGpr3  := wbu.io.retire.gprs(3)
+  io.retireGpr4  := wbu.io.retire.gprs(4)
+  io.retireGpr5  := wbu.io.retire.gprs(5)
+  io.retireGpr6  := wbu.io.retire.gprs(6)
+  io.retireGpr7  := wbu.io.retire.gprs(7)
+  io.retireGpr8  := wbu.io.retire.gprs(8)
+  io.retireGpr9  := wbu.io.retire.gprs(9)
+  io.retireGpr10 := wbu.io.retire.gprs(10)
+  io.retireGpr11 := wbu.io.retire.gprs(11)
+  io.retireGpr12 := wbu.io.retire.gprs(12)
+  io.retireGpr13 := wbu.io.retire.gprs(13)
+  io.retireGpr14 := wbu.io.retire.gprs(14)
+  io.retireGpr15 := wbu.io.retire.gprs(15)
+  io.halt        := wbu.io.retire.halt
+  io.haltCode    := wbu.io.retire.haltCode
+  io.invalid     := wbu.io.retire.invalid
 }

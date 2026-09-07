@@ -3,48 +3,32 @@ package npc
 import chisel3._
 import chisel3.util._
 
-/** Converts logical RV32 load/store operations into aligned memory transfers. */
-class LoadStoreUnit extends Module {
+/** Load/store unit that converts logical RV32 accesses into aligned bus transactions. */
+class LSU extends Module {
   val io = IO(new Bundle {
-    val rawLoad    = Input(Bool())
-    val rawStore   = Input(Bool())
-    val loadValid  = Input(Bool())
-    val storeValid = Input(Bool())
-    val funct3     = Input(UInt(3.W))
+    val decoded    = Input(new DecodedInstruction)
     val address    = Input(UInt(32.W))
     val storeData  = Input(UInt(32.W))
+    val loadValid  = Input(Bool())
+    val storeValid = Input(Bool())
     val readData0  = Input(UInt(32.W))
     val readData1  = Input(UInt(32.W))
 
-    val alignedAddress = Output(UInt(32.W))
-    val address2       = Output(UInt(32.W))
-    val read0Valid     = Output(Bool())
-    val read1Valid     = Output(Bool())
-    val write0Valid    = Output(Bool())
-    val write0Data     = Output(UInt(32.W))
-    val write0Mask     = Output(UInt(4.W))
-    val write1Valid    = Output(Bool())
-    val write1Data     = Output(UInt(32.W))
-    val write1Mask     = Output(UInt(4.W))
-    val loadData       = Output(UInt(32.W))
-    val logicalMask    = Output(UInt(4.W))
+    val result = Output(new LsuResult)
   })
 
-  val accessBytes = Wire(UInt(3.W))
-  val logicalMask = Wire(UInt(4.W))
-  accessBytes := 0.U(3.W)
-  logicalMask := 0.U(4.W)
-
-  when(io.rawLoad) {
-    switch(io.funct3) {
+  val accessBytes = WireDefault(0.U(3.W))
+  val logicalMask = WireDefault(0.U(4.W))
+  when(io.decoded.isLoad) {
+    switch(io.decoded.funct3) {
       is("b000".U) { accessBytes := 1.U; logicalMask := "b0001".U }
       is("b001".U) { accessBytes := 2.U; logicalMask := "b0011".U }
       is("b010".U) { accessBytes := 4.U; logicalMask := "b1111".U }
       is("b100".U) { accessBytes := 1.U; logicalMask := "b0001".U }
       is("b101".U) { accessBytes := 2.U; logicalMask := "b0011".U }
     }
-  }.elsewhen(io.rawStore) {
-    switch(io.funct3) {
+  }.elsewhen(io.decoded.isStore) {
+    switch(io.decoded.funct3) {
       is("b000".U) { accessBytes := 1.U; logicalMask := "b0001".U }
       is("b001".U) { accessBytes := 2.U; logicalMask := "b0011".U }
       is("b010".U) { accessBytes := 4.U; logicalMask := "b1111".U }
@@ -54,18 +38,16 @@ class LoadStoreUnit extends Module {
   val byteOffset  = io.address(1, 0)
   val crossesWord = (byteOffset +& accessBytes) > 4.U
   val readBus     = Cat(io.readData1, io.readData0)
-  val shiftedLoad = Wire(UInt(64.W))
-  shiftedLoad := readBus
+  val shiftedLoad = WireDefault(readBus)
   switch(byteOffset) {
     is(1.U) { shiftedLoad := Cat(0.U(8.W), readBus(63, 8)) }
     is(2.U) { shiftedLoad := Cat(0.U(16.W), readBus(63, 16)) }
     is(3.U) { shiftedLoad := Cat(0.U(24.W), readBus(63, 24)) }
   }
 
-  val loadData = Wire(UInt(32.W))
-  loadData := 0.U(32.W)
-  when(io.rawLoad) {
-    switch(io.funct3) {
+  val loadData = WireDefault(0.U(32.W))
+  when(io.decoded.isLoad) {
+    switch(io.decoded.funct3) {
       is("b000".U) { loadData := Cat(Fill(24, shiftedLoad(7)), shiftedLoad(7, 0)) }
       is("b001".U) { loadData := Cat(Fill(16, shiftedLoad(15)), shiftedLoad(15, 0)) }
       is("b010".U) { loadData := shiftedLoad(31, 0) }
@@ -74,14 +56,10 @@ class LoadStoreUnit extends Module {
     }
   }
 
-  val writeData0 = Wire(UInt(32.W))
-  val writeData1 = Wire(UInt(32.W))
-  val writeMask0 = Wire(UInt(4.W))
-  val writeMask1 = Wire(UInt(4.W))
-  writeData0 := io.storeData
-  writeData1 := 0.U(32.W)
-  writeMask0 := logicalMask
-  writeMask1 := 0.U(4.W)
+  val writeData0 = WireDefault(io.storeData)
+  val writeData1 = WireDefault(0.U(32.W))
+  val writeMask0 = WireDefault(logicalMask)
+  val writeMask1 = WireDefault(0.U(4.W))
   switch(byteOffset) {
     is(1.U) {
       writeData0 := Cat(io.storeData(23, 0), 0.U(8.W))
@@ -103,16 +81,16 @@ class LoadStoreUnit extends Module {
     }
   }
 
-  io.alignedAddress := Cat(io.address(31, 2), 0.U(2.W))
-  io.address2       := io.alignedAddress + 4.U
-  io.read0Valid     := io.loadValid
-  io.read1Valid     := io.loadValid && crossesWord
-  io.write0Valid    := io.storeValid && writeMask0.orR
-  io.write0Data     := writeData0
-  io.write0Mask     := writeMask0
-  io.write1Valid    := io.storeValid && writeMask1.orR
-  io.write1Data     := writeData1
-  io.write1Mask     := writeMask1
-  io.loadData       := loadData
-  io.logicalMask    := logicalMask
+  io.result.alignedAddress := Cat(io.address(31, 2), 0.U(2.W))
+  io.result.address2       := io.result.alignedAddress + 4.U
+  io.result.read0Valid     := io.loadValid
+  io.result.read1Valid     := io.loadValid && crossesWord
+  io.result.write0Valid    := io.storeValid && writeMask0.orR
+  io.result.write0Data     := writeData0
+  io.result.write0Mask     := writeMask0
+  io.result.write1Valid    := io.storeValid && writeMask1.orR
+  io.result.write1Data     := writeData1
+  io.result.write1Mask     := writeMask1
+  io.result.loadData       := loadData
+  io.result.logicalMask    := logicalMask
 }
