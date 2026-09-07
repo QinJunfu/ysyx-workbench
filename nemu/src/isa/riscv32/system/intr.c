@@ -15,13 +15,14 @@
 
 #include <isa.h>
 #include <memory/paddr.h>
+#include <utils.h>
 #include "../local-include/csr.h"
 
 static bool wrote_mcycle = false;
 static bool wrote_minstret = false;
 
 void riscv_csr_reset(void) {
-  cpu.mstatus = 0;
+  cpu.mstatus = UINT32_C(0x1800);
   cpu.mtvec = RESET_VECTOR;
   cpu.mscratch = 0;
   cpu.mepc = 0;
@@ -87,6 +88,10 @@ void riscv_csr_finish_inst(void) {
 word_t isa_raise_intr(word_t NO, vaddr_t epc) {
   cpu.mepc = epc;
   cpu.mcause = NO;
+#ifdef CONFIG_ETRACE
+  trace_write("ETRACE cause = " FMT_WORD ", epc = " FMT_WORD
+      ", handler = " FMT_WORD "\n", cpu.mcause, cpu.mepc, cpu.mtvec);
+#endif
   return cpu.mtvec;
 }
 
