@@ -44,22 +44,7 @@ module NpcTop (
   logic [31:0] io_retire_pc;
   logic [31:0] io_retire_inst;
   logic [31:0] io_retire_dnpc;
-  logic [31:0] io_retire_gpr0;
-  logic [31:0] io_retire_gpr1;
-  logic [31:0] io_retire_gpr2;
-  logic [31:0] io_retire_gpr3;
-  logic [31:0] io_retire_gpr4;
-  logic [31:0] io_retire_gpr5;
-  logic [31:0] io_retire_gpr6;
-  logic [31:0] io_retire_gpr7;
-  logic [31:0] io_retire_gpr8;
-  logic [31:0] io_retire_gpr9;
-  logic [31:0] io_retire_gpr10;
-  logic [31:0] io_retire_gpr11;
-  logic [31:0] io_retire_gpr12;
-  logic [31:0] io_retire_gpr13;
-  logic [31:0] io_retire_gpr14;
-  logic [31:0] io_retire_gpr15;
+  logic [31:0] io_retire_gprs [0:15];
   logic io_halt;
   logic [31:0] io_halt_code;
   logic io_invalid;
@@ -98,15 +83,15 @@ module NpcTop (
     .io_memTraceAddr(io_mem_trace_addr), .io_memTraceData(io_mem_trace_data),
     .io_memTraceMask(io_mem_trace_mask), .io_retireValid(io_retire_valid),
     .io_retirePc(io_retire_pc), .io_retireInst(io_retire_inst),
-    .io_retireDnPc(io_retire_dnpc), .io_retireGpr0(io_retire_gpr0),
-    .io_retireGpr1(io_retire_gpr1), .io_retireGpr2(io_retire_gpr2),
-    .io_retireGpr3(io_retire_gpr3), .io_retireGpr4(io_retire_gpr4),
-    .io_retireGpr5(io_retire_gpr5), .io_retireGpr6(io_retire_gpr6),
-    .io_retireGpr7(io_retire_gpr7), .io_retireGpr8(io_retire_gpr8),
-    .io_retireGpr9(io_retire_gpr9), .io_retireGpr10(io_retire_gpr10),
-    .io_retireGpr11(io_retire_gpr11), .io_retireGpr12(io_retire_gpr12),
-    .io_retireGpr13(io_retire_gpr13), .io_retireGpr14(io_retire_gpr14),
-    .io_retireGpr15(io_retire_gpr15), .io_halt(io_halt),
+    .io_retireDnPc(io_retire_dnpc), .io_retireGprs_0(io_retire_gprs[0]),
+    .io_retireGprs_1(io_retire_gprs[1]), .io_retireGprs_2(io_retire_gprs[2]),
+    .io_retireGprs_3(io_retire_gprs[3]), .io_retireGprs_4(io_retire_gprs[4]),
+    .io_retireGprs_5(io_retire_gprs[5]), .io_retireGprs_6(io_retire_gprs[6]),
+    .io_retireGprs_7(io_retire_gprs[7]), .io_retireGprs_8(io_retire_gprs[8]),
+    .io_retireGprs_9(io_retire_gprs[9]), .io_retireGprs_10(io_retire_gprs[10]),
+    .io_retireGprs_11(io_retire_gprs[11]), .io_retireGprs_12(io_retire_gprs[12]),
+    .io_retireGprs_13(io_retire_gprs[13]), .io_retireGprs_14(io_retire_gprs[14]),
+    .io_retireGprs_15(io_retire_gprs[15]), .io_halt(io_halt),
     .io_haltCode(io_halt_code), .io_invalid(io_invalid),
     .io_uartTxValid(io_uart_tx_valid), .io_uartTxData(io_uart_tx_data),
     .io_master_awvalid(io_master_awvalid), .io_master_awready(io_master_awready),
@@ -229,10 +214,10 @@ module NpcTop (
 `ifndef SYNTHESIS
       npc_commit(
         io_retire_pc, io_retire_inst, io_retire_dnpc,
-        io_retire_gpr0, io_retire_gpr1, io_retire_gpr2, io_retire_gpr3,
-        io_retire_gpr4, io_retire_gpr5, io_retire_gpr6, io_retire_gpr7,
-        io_retire_gpr8, io_retire_gpr9, io_retire_gpr10, io_retire_gpr11,
-        io_retire_gpr12, io_retire_gpr13, io_retire_gpr14, io_retire_gpr15,
+        io_retire_gprs[0], io_retire_gprs[1], io_retire_gprs[2], io_retire_gprs[3],
+        io_retire_gprs[4], io_retire_gprs[5], io_retire_gprs[6], io_retire_gprs[7],
+        io_retire_gprs[8], io_retire_gprs[9], io_retire_gprs[10], io_retire_gprs[11],
+        io_retire_gprs[12], io_retire_gprs[13], io_retire_gprs[14], io_retire_gprs[15],
         int'(io_mem_trace_valid), int'(io_mem_trace_write), io_mem_trace_addr,
         io_mem_trace_data, int'(io_mem_trace_mask), int'(io_halt), io_halt_code,
         int'(io_invalid)
