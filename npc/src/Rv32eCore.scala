@@ -21,6 +21,7 @@ class Rv32eCore(val resetPc: BigInt = BigInt("80000000", 16)) extends Module {
   val wbu = Module(new WBU(resetPc))
 
   ifu.io.imemData := io.imemData
+  ifu.io.run      := true.B
   ifu.io.nextPc   := wbu.io.nextPc
   ifu.io.halt     := wbu.io.halt
 

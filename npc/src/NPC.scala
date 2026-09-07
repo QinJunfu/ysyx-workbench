@@ -1,4 +1,5 @@
 package npc
 
-/** Default RTL top instantiated by the SystemVerilog simulation wrapper. */
-class NPC(resetPc: BigInt = BigInt("80000000", 16)) extends Rv32eCore(resetPc)
+// NPC is implemented in BusNpc.scala so the AXI master port and the
+// multi-cycle controller stay together.  This file is intentionally kept as
+// a small source anchor for tools that expect an NPC.scala path.

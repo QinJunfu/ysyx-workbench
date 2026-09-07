@@ -4,6 +4,8 @@
 
 static NpcSimulator *npc_dpi_simulator;
 
+
+
 void npc_dpi_set_simulator(NpcSimulator *simulator) {
   npc_dpi_simulator = simulator;
 }

@@ -7,6 +7,11 @@ class IFU(resetPc: BigInt) extends Module {
   val io = IO(new Bundle {
     val imemData = Input(UInt(32.W))
 
+    // The multi-cycle wrapper can hold the architectural state while waiting
+    // for an instruction response.  The original single-cycle core ties this
+    // input high.
+    val run = Input(Bool())
+
     val nextPc = Input(UInt(32.W))
     val halt   = Input(Bool())
 
@@ -24,7 +29,7 @@ class IFU(resetPc: BigInt) extends Module {
   io.inst     := io.imemData
   io.imemAddr := pc
 
-  when(!halted) {
+  when(io.run && !halted) {
     pc := io.nextPc
     when(io.halt) {
       halted := true.B
