@@ -23,7 +23,7 @@ class CsrFile(resetPc: BigInt) extends Module {
     val ecallPc            = Input(UInt(32.W))
   })
 
-  val mstatus  = RegInit(0.U(32.W))
+  val mstatus  = RegInit("h1800".U(32.W))
   val mtvec    = RegInit(resetPc.U(32.W))
   val mscratch = RegInit(0.U(32.W))
   val mepc     = RegInit(0.U(32.W))
@@ -44,14 +44,17 @@ class CsrFile(resetPc: BigInt) extends Module {
     is("h344".U) { io.readData := mip; io.readSupported := true.B }
     is("hB00".U) { io.readData := mcycle(31, 0); io.readSupported := true.B }
     is("hB02".U) { io.readData := minstret(31, 0); io.readSupported := true.B }
+    is("hB80".U) { io.readData := mcycle(63, 32); io.readSupported := true.B }
+    is("hF11".U) { io.readData := "h79737978".U(32.W); io.readSupported := true.B }
+    is("hF12".U) { io.readData := 24100022.U(32.W); io.readSupported := true.B }
     is("hF14".U) { io.readData := 0.U(32.W); io.readSupported := true.B }
   }
 
   io.mtvec := mtvec
   io.mepc  := mepc
 
+  mcycle := mcycle + 1.U
   when(io.active) {
-    mcycle := mcycle + 1.U
     when(io.retiredInstruction) {
       minstret := minstret + 1.U
     }
@@ -69,6 +72,7 @@ class CsrFile(resetPc: BigInt) extends Module {
         is("h344".U) { mip := io.writeData }
         is("hB00".U) { mcycle := Cat(mcycle(63, 32), io.writeData) }
         is("hB02".U) { minstret := Cat(minstret(63, 32), io.writeData) }
+        is("hB80".U) { mcycle := Cat(io.writeData, mcycle(31, 0)) }
       }
     }
   }

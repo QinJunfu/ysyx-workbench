@@ -129,7 +129,7 @@ int npc_difftest_step(NpcDifftest *difftest, const NpcCommit *dut,
   return 1;
 }
 
-void npc_difftest_sync_mmio(NpcDifftest *difftest, const NpcCommit *dut) {
+void npc_difftest_sync_to_dut(NpcDifftest *difftest, const NpcCommit *dut) {
   NpcNemuState reference;
   uint32_t nop;
   uint32_t instruction;
@@ -140,9 +140,8 @@ void npc_difftest_sync_mmio(NpcDifftest *difftest, const NpcCommit *dut) {
   }
 
   /*
-   * The reference has no matching host device.  Execute a NOP at the same
-   * PC so its instruction counters advance, then restore the image before
-   * copying the DUT-visible state into it.
+   * Execute a NOP for an instruction whose externally visible result cannot
+   * be reproduced by the reference, then copy the DUT-visible state into it.
    */
   nop = UINT32_C(0x00000013);
   instruction = dut->inst;

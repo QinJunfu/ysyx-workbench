@@ -45,6 +45,9 @@ bool riscv_csr_read(word_t addr, word_t *value) {
     case RISCV_CSR_MIP: *value = cpu.mip; return true;
     case RISCV_CSR_MCYCLE: *value = (word_t)cpu.mcycle; return true;
     case RISCV_CSR_MINSTRET: *value = (word_t)cpu.minstret; return true;
+    case RISCV_CSR_MCYCLEH: *value = (word_t)(cpu.mcycle >> 32); return true;
+    case RISCV_CSR_MVENDORID: *value = UINT32_C(0x79737978); return true;
+    case RISCV_CSR_MARCHID: *value = UINT32_C(24100022); return true;
     case RISCV_CSR_MHARTID: *value = 0; return true;
     default: return false;
   }
@@ -66,8 +69,14 @@ bool riscv_csr_write(word_t addr, word_t value) {
       cpu.minstret = (cpu.minstret & UINT64_C(0xffffffff00000000)) | (uint32_t)value;
       wrote_minstret = true;
       return true;
+    case RISCV_CSR_MCYCLEH:
+      cpu.mcycle = ((uint64_t)(uint32_t)value << 32) | (uint32_t)cpu.mcycle;
+      wrote_mcycle = true;
+      return true;
     // NPC currently treats writes to these read-only CSRs as no-ops.
     case RISCV_CSR_MISA:
+    case RISCV_CSR_MVENDORID:
+    case RISCV_CSR_MARCHID:
     case RISCV_CSR_MHARTID:
       return true;
     default:

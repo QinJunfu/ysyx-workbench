@@ -172,9 +172,8 @@ class NPC(val resetPc: BigInt = BigInt("80000000", 16)) extends Module {
   xbar.io.cpu.araddr  := 0.U
   xbar.io.cpu.rready  := false.B
 
-  // Keep the write address stable through the B response.  The Xbar uses the
-  // address to select the response channel, and AXI requires request fields
-  // to remain stable until their handshake has completed.
+  // This compact Xbar selects each response channel from the current request
+  // address, so keep the address stable until the response is accepted.
   when(state === sStoreReq0 || state === sStoreResp0) {
     xbar.io.cpu.awaddr := core.io.dmemWrite0Addr
   }.elsewhen(state === sStoreReq1 || state === sStoreResp1) {
@@ -185,16 +184,19 @@ class NPC(val resetPc: BigInt = BigInt("80000000", 16)) extends Module {
     xbar.io.cpu.arvalid := true.B
     xbar.io.cpu.araddr  := core.io.imemAddr
   }.elsewhen(state === sFetchResp) {
+    xbar.io.cpu.araddr := core.io.imemAddr
     xbar.io.cpu.rready := true.B
   }.elsewhen(state === sLoadReq0) {
     xbar.io.cpu.arvalid := true.B
     xbar.io.cpu.araddr  := core.io.dmemAddr
   }.elsewhen(state === sLoadResp0) {
+    xbar.io.cpu.araddr := core.io.dmemAddr
     xbar.io.cpu.rready := true.B
   }.elsewhen(state === sLoadReq1) {
     xbar.io.cpu.arvalid := true.B
     xbar.io.cpu.araddr  := core.io.dmemAddr2
   }.elsewhen(state === sLoadResp1) {
+    xbar.io.cpu.araddr := core.io.dmemAddr2
     xbar.io.cpu.rready := true.B
   }.elsewhen(state === sStoreReq0) {
     xbar.io.cpu.awvalid := !awSent

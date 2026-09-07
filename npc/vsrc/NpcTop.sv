@@ -149,6 +149,7 @@ module NpcTop (
 `ifndef SYNTHESIS
       if (io_uart_tx_valid) begin
         $write("%c", io_uart_tx_data);
+        $fflush();
       end
 `endif
 
@@ -188,6 +189,7 @@ module NpcTop (
 `ifndef SYNTHESIS
           if (((write_data_valid ? write_strb_reg : io_master_wstrb) & 4'b0001) != 0) begin
             $write("%c", (write_data_valid ? write_data_reg : io_master_wdata) & 32'hff);
+            $fflush();
           end
 `endif
         end else if ((write_addr_valid ? write_addr_reg : io_master_awaddr) != 32'h20000000 &&

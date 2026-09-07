@@ -359,6 +359,21 @@ void npc_simulator_dpi_write(NpcSimulator *simulator, uint32_t address, uint32_t
   }
 }
 
+static int npc_simulator_accesses_cycle_csr(uint32_t instruction) {
+  uint32_t csr;
+  uint32_t funct3;
+
+  if ((instruction & UINT32_C(0x7f)) != UINT32_C(0x73)) {
+    return 0;
+  }
+  funct3 = (instruction >> 12) & UINT32_C(0x7);
+  if (funct3 == 0) {
+    return 0;
+  }
+  csr = instruction >> 20;
+  return csr == UINT32_C(0xb00) || csr == UINT32_C(0xb80);
+}
+
 void npc_simulator_dpi_commit(NpcSimulator *simulator, const NpcCommit *commit) {
   char error[NPC_ERROR_SIZE];
 
@@ -371,9 +386,10 @@ void npc_simulator_dpi_commit(NpcSimulator *simulator, const NpcCommit *commit) 
   npc_trace_record(simulator->trace, &simulator->state);
   npc_simulator_check_watchpoints(simulator);
   if (!simulator->state.invalid && npc_difftest_enabled(simulator->difftest)) {
-    if (simulator->state.mem_valid &&
-        npc_devices_accesses_mmio(simulator->state.mem_addr, simulator->state.mem_mask)) {
-      npc_difftest_sync_mmio(simulator->difftest, &simulator->state);
+    if ((simulator->state.mem_valid &&
+         npc_devices_accesses_mmio(simulator->state.mem_addr, simulator->state.mem_mask)) ||
+        npc_simulator_accesses_cycle_csr(simulator->state.inst)) {
+      npc_difftest_sync_to_dut(simulator->difftest, &simulator->state);
     } else if (!npc_difftest_step(simulator->difftest, &simulator->state, error,
                                   sizeof(error))) {
       npc_simulator_fatal(simulator, error);
