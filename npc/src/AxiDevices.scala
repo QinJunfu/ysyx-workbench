@@ -4,19 +4,24 @@ import chisel3._
 
 /** AXI4-Lite slave directions, written out to make each handshake visible. */
 class AxiLiteSlaveIO extends Bundle {
+  // AW
   val awvalid = Input(Bool())
   val awready = Output(Bool())
   val awaddr = Input(UInt(32.W))
+  // W
   val wvalid = Input(Bool())
   val wready = Output(Bool())
   val wdata = Input(UInt(32.W))
   val wstrb = Input(UInt(4.W))
+  // B
   val bvalid = Output(Bool())
   val bready = Input(Bool())
   val bresp = Output(UInt(2.W))
+  // AR
   val arvalid = Input(Bool())
   val arready = Output(Bool())
   val araddr = Input(UInt(32.W))
+  // R
   val rvalid = Output(Bool())
   val rready = Input(Bool())
   val rdata = Output(UInt(32.W))
