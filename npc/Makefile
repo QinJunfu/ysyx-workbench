@@ -67,9 +67,6 @@ endif
 
 all: sim
 
-test:
-	$(MILL) -i test
-
 ref:
 	@bash ./scripts/build-nemu-ref.sh
 
@@ -141,7 +138,7 @@ idea:
 clean:
 	-rm -rf $(BUILD_DIR)
 
-.PHONY: all test ref verilog sim run help reformat checkformat bsp idea clean
+.PHONY: all ref verilog sim run help reformat checkformat bsp idea clean
 
 -include $(C_DEPS)
 
