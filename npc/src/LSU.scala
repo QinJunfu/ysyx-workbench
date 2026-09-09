@@ -18,20 +18,21 @@ class LSU extends Module {
   })
 
   val accessBytes = WireDefault(0.U(3.W))
+  val accessSize  = WireDefault(0.U(3.W))
   val logicalMask = WireDefault(0.U(4.W))
   when(io.decoded.isLoad) {
     switch(io.decoded.funct3) {
-      is("b000".U) { accessBytes := 1.U; logicalMask := "b0001".U }
-      is("b001".U) { accessBytes := 2.U; logicalMask := "b0011".U }
-      is("b010".U) { accessBytes := 4.U; logicalMask := "b1111".U }
-      is("b100".U) { accessBytes := 1.U; logicalMask := "b0001".U }
-      is("b101".U) { accessBytes := 2.U; logicalMask := "b0011".U }
+      is("b000".U) { accessBytes := 1.U; accessSize := 0.U; logicalMask := "b0001".U }
+      is("b001".U) { accessBytes := 2.U; accessSize := 1.U; logicalMask := "b0011".U }
+      is("b010".U) { accessBytes := 4.U; accessSize := 2.U; logicalMask := "b1111".U }
+      is("b100".U) { accessBytes := 1.U; accessSize := 0.U; logicalMask := "b0001".U }
+      is("b101".U) { accessBytes := 2.U; accessSize := 1.U; logicalMask := "b0011".U }
     }
   }.elsewhen(io.decoded.isStore) {
     switch(io.decoded.funct3) {
-      is("b000".U) { accessBytes := 1.U; logicalMask := "b0001".U }
-      is("b001".U) { accessBytes := 2.U; logicalMask := "b0011".U }
-      is("b010".U) { accessBytes := 4.U; logicalMask := "b1111".U }
+      is("b000".U) { accessBytes := 1.U; accessSize := 0.U; logicalMask := "b0001".U }
+      is("b001".U) { accessBytes := 2.U; accessSize := 1.U; logicalMask := "b0011".U }
+      is("b010".U) { accessBytes := 4.U; accessSize := 2.U; logicalMask := "b1111".U }
     }
   }
 
@@ -81,6 +82,8 @@ class LSU extends Module {
     }
   }
 
+  io.result.logicalAddress := io.address
+  io.result.accessSize     := accessSize
   io.result.alignedAddress := Cat(io.address(31, 2), 0.U(2.W))
   io.result.address2       := io.result.alignedAddress + 4.U
   io.result.read0Valid     := io.loadValid

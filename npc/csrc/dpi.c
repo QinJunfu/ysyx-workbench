@@ -24,6 +24,24 @@ void pmem_write(int waddr, int wdata, char wmask) {
   }
 }
 
+void mrom_read(int32_t addr, int32_t *data) {
+  if (data == NULL) {
+    return;
+  }
+  *data = npc_dpi_simulator == NULL
+              ? 0
+              : (int32_t)npc_simulator_mrom_read(npc_dpi_simulator, (uint32_t)addr);
+}
+
+void flash_read(int32_t addr, int32_t *data) {
+  if (data == NULL) {
+    return;
+  }
+  *data = npc_dpi_simulator == NULL
+              ? 0
+              : (int32_t)npc_simulator_flash_read(npc_dpi_simulator, (uint32_t)addr);
+}
+
 void npc_commit(int pc, int inst, int dnpc, int gpr0, int gpr1, int gpr2, int gpr3,
                 int gpr4, int gpr5, int gpr6, int gpr7, int gpr8, int gpr9,
                 int gpr10, int gpr11, int gpr12, int gpr13, int gpr14, int gpr15,

@@ -2,12 +2,10 @@ package npc
 
 import chisel3._
 
-/**
-  * Single-cycle RV32E core organized as IFU, IDU, EXU, LSU, and WBU.
+/** Single-cycle RV32E core organized as IFU, IDU, EXU, LSU, and WBU.
   *
-  * The five units are connected only by combinational signals. IFU's PC and
-  * WBU's register/CSR files are the architectural state updated at the clock
-  * edge, so one active clock cycle still retires exactly one instruction.
+  * The five units are connected only by combinational signals. IFU's PC and WBU's register/CSR files are the
+  * architectural state updated at the clock edge, so one active clock cycle still retires exactly one instruction.
   */
 class Rv32eCore(val resetPc: BigInt = BigInt("80000000", 16)) extends Module {
   require(resetPc >= 0 && resetPc < (BigInt(1) << 32), "resetPc must fit in 32 bits")
@@ -28,12 +26,12 @@ class Rv32eCore(val resetPc: BigInt = BigInt("80000000", 16)) extends Module {
   idu.io.pc   := ifu.io.pc
   idu.io.inst := ifu.io.inst
 
-  wbu.io.active  := ifu.io.active
+  wbu.io.active := ifu.io.active
   wbu.io.decoded <> idu.io.decoded
-  wbu.io.exu     <> exu.io.result
-  wbu.io.lsu     <> lsu.io.result
+  wbu.io.exu <> exu.io.result
+  wbu.io.lsu <> lsu.io.result
 
-  exu.io.decoded      <> idu.io.decoded
+  exu.io.decoded <> idu.io.decoded
   exu.io.rs1Data      := wbu.io.rs1Data
   exu.io.rs2Data      := wbu.io.rs2Data
   exu.io.csrReadData  := wbu.io.csrReadData
@@ -41,7 +39,7 @@ class Rv32eCore(val resetPc: BigInt = BigInt("80000000", 16)) extends Module {
   exu.io.mtvec        := wbu.io.mtvec
   exu.io.mepc         := wbu.io.mepc
 
-  lsu.io.decoded    <> idu.io.decoded
+  lsu.io.decoded <> idu.io.decoded
   lsu.io.address    := exu.io.result.memoryAddr
   lsu.io.storeData  := wbu.io.rs2Data
   lsu.io.loadValid  := wbu.io.loadValid
@@ -51,6 +49,8 @@ class Rv32eCore(val resetPc: BigInt = BigInt("80000000", 16)) extends Module {
 
   io.imemAddr        := ifu.io.imemAddr
   io.dmemAddr        := lsu.io.result.alignedAddress
+  io.dmemLogicalAddr := lsu.io.result.logicalAddress
+  io.dmemAccessSize  := lsu.io.result.accessSize
   io.dmemAddr2       := lsu.io.result.address2
   io.dmemReadValid   := lsu.io.result.read0Valid
   io.dmemReadValid2  := lsu.io.result.read1Valid

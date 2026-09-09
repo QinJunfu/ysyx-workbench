@@ -2,6 +2,7 @@
 #define NPC_OPTIONS_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include "common.h"
 
@@ -11,8 +12,14 @@ extern "C" {
 
 typedef struct {
   char image[NPC_PATH_SIZE];
+  char mrom_image[NPC_PATH_SIZE];
+  char flash_image[NPC_PATH_SIZE];
   char elf[NPC_PATH_SIZE];
+  char waveform[NPC_PATH_SIZE];
+  uint64_t max_cycles;
+  uint64_t progress_interval;
   int batch;
+  int nvboard;
 } NpcOptions;
 
 typedef enum {

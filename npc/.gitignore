@@ -9,6 +9,7 @@
 !*.sv
 !*.cpp
 !*.cc
+!*.nxdc
 !Kconfig
 !configs/
 !configs/*_defconfig

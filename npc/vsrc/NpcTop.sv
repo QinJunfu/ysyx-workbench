@@ -22,6 +22,8 @@ module NpcTop (
   logic [31:0] io_imem_addr;
   logic [31:0] io_imem_data;
   logic [31:0] io_dmem_addr;
+  logic [31:0] io_dmem_logical_addr;
+  logic [2:0] io_dmem_access_size;
   logic [31:0] io_dmem_rdata;
   logic io_dmem_read_valid;
   logic [31:0] io_dmem_addr2;
@@ -54,6 +56,7 @@ module NpcTop (
   logic io_master_awvalid;
   logic io_master_awready;
   logic [31:0] io_master_awaddr;
+  logic [2:0] io_master_awsize;
   logic io_master_wvalid;
   logic io_master_wready;
   logic [31:0] io_master_wdata;
@@ -64,6 +67,7 @@ module NpcTop (
   logic io_master_arvalid;
   logic io_master_arready;
   logic [31:0] io_master_araddr;
+  logic [2:0] io_master_arsize;
   logic io_master_rvalid;
   logic io_master_rready;
   logic [31:0] io_master_rdata;
@@ -73,6 +77,7 @@ module NpcTop (
     .clock(clock), .reset(reset),
     .io_imemAddr(io_imem_addr), .io_imemData(io_imem_data),
     .io_dmemAddr(io_dmem_addr), .io_dmemRdata(io_dmem_rdata),
+    .io_dmemLogicalAddr(io_dmem_logical_addr), .io_dmemAccessSize(io_dmem_access_size),
     .io_dmemReadValid(io_dmem_read_valid), .io_dmemAddr2(io_dmem_addr2),
     .io_dmemRdata2(io_dmem_rdata2), .io_dmemReadValid2(io_dmem_read_valid2),
     .io_dmemWrite0Valid(io_dmem_write0_valid), .io_dmemWrite0Addr(io_dmem_write0_addr),
@@ -95,12 +100,14 @@ module NpcTop (
     .io_haltCode(io_halt_code), .io_invalid(io_invalid),
     .io_uartTxValid(io_uart_tx_valid), .io_uartTxData(io_uart_tx_data),
     .io_master_awvalid(io_master_awvalid), .io_master_awready(io_master_awready),
-    .io_master_awaddr(io_master_awaddr), .io_master_wvalid(io_master_wvalid),
+    .io_master_awaddr(io_master_awaddr), .io_master_awsize(io_master_awsize),
+    .io_master_wvalid(io_master_wvalid),
     .io_master_wready(io_master_wready), .io_master_wdata(io_master_wdata),
     .io_master_wstrb(io_master_wstrb), .io_master_bvalid(io_master_bvalid),
     .io_master_bready(io_master_bready), .io_master_bresp(io_master_bresp),
     .io_master_arvalid(io_master_arvalid), .io_master_arready(io_master_arready),
-    .io_master_araddr(io_master_araddr), .io_master_rvalid(io_master_rvalid),
+    .io_master_araddr(io_master_araddr), .io_master_arsize(io_master_arsize),
+    .io_master_rvalid(io_master_rvalid),
     .io_master_rready(io_master_rready), .io_master_rdata(io_master_rdata),
     .io_master_rresp(io_master_rresp)
   );

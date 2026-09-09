@@ -14,13 +14,38 @@ config PC_RESET_OFFSET
   default 0x100000 if ISA_x86
   default 0
 
+config YSYXSOC_MEMORY
+  bool "Enable the discontiguous ysyxSoC physical memory map"
+  depends on ISA_riscv && !RV64 && !TARGET_AM
+  default n
+  help
+    Add MROM, SRAM, flash, PSRAM and SDRAM backing stores at the addresses
+    exported by ysyxSoC. CONFIG_MBASE still selects the reset vector region.
+
+choice
+  prompt "ysyxsoc SDRAM capacity"
+  depends on YSYXSOC_MEMORY
+  default YSYXSOC_SDRAM_128MB
+
+config YSYXSOC_SDRAM_32MB
+  bool "32 MiB (one SDRAM chip)"
+
+config YSYXSOC_SDRAM_64MB
+  bool "64 MiB (two-chip bit expansion)"
+
+config YSYXSOC_SDRAM_128MB
+  bool "128 MiB (four-chip word expansion)"
+
+endchoice
+
 choice
   prompt "Physical memory definition"
+  default PMEM_MALLOC if YSYXSOC_MEMORY
   default PMEM_GARRAY
 config PMEM_MALLOC
   bool "Using malloc()"
 config PMEM_GARRAY
-  depends on !TARGET_AM
+  depends on !TARGET_AM && !YSYXSOC_MEMORY
   bool "Using global array"
 endchoice
 

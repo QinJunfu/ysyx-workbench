@@ -1,3 +1,5 @@
+CONFIG_NPC_PLATFORM_DIRECT=y
+# CONFIG_NPC_PLATFORM_YSYXSOC is not set
 # CONFIG_NPC_DIFFTEST is not set
 CONFIG_NPC_DIFFTEST_REF_PATH="../nemu/build/riscv32-nemu-interpreter-so"
 # CONFIG_NPC_ITRACE is not set

@@ -6,6 +6,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <generated/autoconf.h>
+
 typedef struct {
   uint32_t gpr[32];
   uint32_t pc;
@@ -91,8 +93,19 @@ int npc_difftest_initialize(NpcDifftest *difftest, const char *path,
   }
 
   difftest->init_fn(0);
+#ifdef CONFIG_NPC_PLATFORM_YSYXSOC
+  if (npc_memory_mrom_size(memory) != 0) {
+    difftest->memcpy_fn(NPC_MROM_BASE, (void *)npc_memory_mrom_data(memory),
+                        npc_memory_mrom_size(memory), true);
+  }
+  if (npc_memory_flash_size(memory) != 0) {
+    difftest->memcpy_fn(NPC_FLASH_BASE, (void *)npc_memory_flash_data(memory),
+                        npc_memory_flash_size(memory), true);
+  }
+#else
   difftest->memcpy_fn(NPC_PMEM_BASE, (void *)npc_memory_data(memory),
                       npc_memory_image_size(memory), true);
+#endif
   memset(&initial, 0, sizeof(initial));
   initial.pc = reset_pc;
   difftest->regcpy_fn(&initial, true);

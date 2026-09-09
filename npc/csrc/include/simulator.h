@@ -26,6 +26,8 @@ uint32_t npc_simulator_dpi_read(NpcSimulator *simulator, uint32_t address);
 void npc_simulator_dpi_write(NpcSimulator *simulator, uint32_t address, uint32_t value,
                              uint8_t mask);
 void npc_simulator_dpi_commit(NpcSimulator *simulator, const NpcCommit *commit);
+uint32_t npc_simulator_mrom_read(NpcSimulator *simulator, uint32_t address);
+uint32_t npc_simulator_flash_read(NpcSimulator *simulator, uint32_t address);
 
 int npc_simulator_is_active(const NpcSimulator *simulator);
 void npc_simulator_continue(NpcSimulator *simulator);

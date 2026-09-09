@@ -60,6 +60,7 @@ static void npc_simulator_evaluate(NpcSimulator *simulator) {
 }
 
 static void npc_simulator_single_cycle(NpcSimulator *simulator) {
+  npc_verilator_host_update_devices(simulator->host);
   npc_verilator_host_set_clock(simulator->host, 0);
   npc_simulator_evaluate(simulator);
   npc_verilator_host_set_clock(simulator->host, 1);
@@ -67,6 +68,23 @@ static void npc_simulator_single_cycle(NpcSimulator *simulator) {
   npc_verilator_host_set_clock(simulator->host, 0);
   npc_simulator_evaluate(simulator);
   simulator->cycles += 1;
+  if (simulator->options.progress_interval != 0 &&
+      simulator->cycles % simulator->options.progress_interval == 0) {
+    fprintf(stderr, "[NPC] cycles=%llu instructions=%llu pc=0x%08x\n",
+            (unsigned long long)simulator->cycles,
+            (unsigned long long)simulator->instructions, simulator->state.dnpc);
+  }
+  if (simulator->options.max_cycles != 0 &&
+      simulator->cycles >= simulator->options.max_cycles &&
+      !simulator->halted && !simulator->fatal && !simulator->quit) {
+    char message[NPC_ERROR_SIZE];
+
+    (void)snprintf(message, sizeof(message),
+                   "cycle limit reached after %llu cycles and %llu instructions",
+                   (unsigned long long)simulator->cycles,
+                   (unsigned long long)simulator->instructions);
+    npc_simulator_fatal(simulator, message);
+  }
 }
 
 static void npc_simulator_check_watchpoints(NpcSimulator *simulator) {
@@ -120,6 +138,7 @@ static int npc_simulator_exit_status(const NpcSimulator *simulator) {
   return simulator->quit ? 0 : 1;
 }
 
+#ifdef CONFIG_NPC_DIFFTEST
 static int npc_simulator_normalize_path(const char *path, char *normalized,
                                         size_t normalized_size) {
   char work[NPC_PATH_SIZE * 2u];
@@ -206,6 +225,7 @@ static int npc_simulator_normalize_path(const char *path, char *normalized,
   normalized[used] = '\0';
   return 1;
 }
+#endif
 
 NpcSimulator *npc_simulator_create(const NpcOptions *options, char *error,
                                    size_t error_size) {
@@ -255,7 +275,27 @@ void npc_simulator_destroy(NpcSimulator *simulator) {
 }
 
 int npc_simulator_load_image(NpcSimulator *simulator, char *error, size_t error_size) {
-  return npc_memory_load_image(simulator->memory, simulator->options.image, error, error_size);
+#ifdef CONFIG_NPC_PLATFORM_YSYXSOC
+  const char *mrom_path;
+
+  mrom_path = simulator->options.mrom_image;
+  if (mrom_path[0] == '\0' && simulator->options.flash_image[0] == '\0') {
+    mrom_path = simulator->options.image;
+  }
+  if (mrom_path[0] != '\0' &&
+      !npc_memory_load_mrom(simulator->memory, mrom_path, error, error_size)) {
+    return 0;
+  }
+  if (simulator->options.flash_image[0] != '\0' &&
+      !npc_memory_load_flash(simulator->memory, simulator->options.flash_image, error,
+                             error_size)) {
+    return 0;
+  }
+  return 1;
+#else
+  return npc_memory_load_image(simulator->memory, simulator->options.image, error,
+                               error_size);
+#endif
 }
 
 int npc_simulator_initialize_difftest(NpcSimulator *simulator, char *error,
@@ -284,7 +324,7 @@ int npc_simulator_initialize_difftest(NpcSimulator *simulator, char *error,
     return 0;
   }
   return npc_difftest_initialize(simulator->difftest, reference_path, simulator->memory,
-                                  NPC_PMEM_BASE, error, error_size);
+                                  NPC_RESET_PC, error, error_size);
 #else
   (void)simulator;
   (void)error;
@@ -295,26 +335,48 @@ int npc_simulator_initialize_difftest(NpcSimulator *simulator, char *error,
 
 int npc_simulator_initialize(NpcSimulator *simulator, int argc, char **argv,
                              char *error, size_t error_size) {
-  simulator->host = npc_verilator_host_create(argc, argv, error, error_size);
+  unsigned int reset_assert_cycles;
+  unsigned int reset_drain_cycles;
+  unsigned int index;
+
+  simulator->host = npc_verilator_host_create(argc, argv, &simulator->options, error,
+                                               error_size);
   if (simulator->host == NULL) {
     return 0;
   }
 
   npc_devices_init(&simulator->devices);
   memset(&simulator->state, 0, sizeof(simulator->state));
-  simulator->state.pc = NPC_PMEM_BASE;
-  simulator->state.dnpc = NPC_PMEM_BASE;
+  simulator->state.pc = NPC_RESET_PC;
+  simulator->state.dnpc = NPC_RESET_PC;
   npc_dpi_set_simulator(simulator);
   simulator->reset_active = 1;
   npc_verilator_host_set_clock(simulator->host, 0);
   npc_verilator_host_set_reset(simulator->host, 1);
   npc_simulator_evaluate(simulator);
-  npc_verilator_host_set_clock(simulator->host, 1);
-  npc_simulator_evaluate(simulator);
-  npc_verilator_host_set_clock(simulator->host, 0);
-  npc_simulator_evaluate(simulator);
+#ifdef CONFIG_NPC_PLATFORM_YSYXSOC
+  reset_assert_cycles = 16;
+  reset_drain_cycles = 10;
+#else
+  reset_assert_cycles = 1;
+  reset_drain_cycles = 0;
+#endif
+  for (index = 0; index < reset_assert_cycles; ++index) {
+    npc_verilator_host_set_clock(simulator->host, 1);
+    npc_simulator_evaluate(simulator);
+    npc_verilator_host_set_clock(simulator->host, 0);
+    npc_simulator_evaluate(simulator);
+  }
   npc_verilator_host_set_reset(simulator->host, 0);
   npc_simulator_evaluate(simulator);
+  // ysyxSoC inserts a ten-stage reset synchronizer in front of the CPU.
+  // Drain it before execution so reset cannot arrive after instructions retire.
+  for (index = 0; index < reset_drain_cycles; ++index) {
+    npc_verilator_host_set_clock(simulator->host, 1);
+    npc_simulator_evaluate(simulator);
+    npc_verilator_host_set_clock(simulator->host, 0);
+    npc_simulator_evaluate(simulator);
+  }
   simulator->reset_active = 0;
   return 1;
 }
@@ -357,6 +419,30 @@ void npc_simulator_dpi_write(NpcSimulator *simulator, uint32_t address, uint32_t
                                     sizeof(error))) {
     npc_simulator_fatal(simulator, error);
   }
+}
+
+uint32_t npc_simulator_mrom_read(NpcSimulator *simulator, uint32_t address) {
+  uint32_t value;
+  char error[NPC_ERROR_SIZE];
+
+  value = 0;
+  if (!npc_memory_read_mrom_word(simulator->memory, address, &value, error,
+                                 sizeof(error)) && !simulator->reset_active) {
+    npc_simulator_fatal(simulator, error);
+  }
+  return value;
+}
+
+uint32_t npc_simulator_flash_read(NpcSimulator *simulator, uint32_t address) {
+  uint32_t value;
+  char error[NPC_ERROR_SIZE];
+
+  value = 0;
+  if (!npc_memory_read_flash_word(simulator->memory, address, &value, error,
+                                  sizeof(error)) && !simulator->reset_active) {
+    npc_simulator_fatal(simulator, error);
+  }
+  return value;
 }
 
 static int npc_simulator_accesses_cycle_csr(uint32_t instruction) {

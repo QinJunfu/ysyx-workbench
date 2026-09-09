@@ -2,6 +2,8 @@
 
 #include <stdio.h>
 
+#include <generated/autoconf.h>
+
 static uint64_t npc_devices_elapsed_us(const NpcDevices *devices) {
   struct timeval now;
   int64_t seconds;
@@ -23,8 +25,18 @@ static uint64_t npc_devices_elapsed_us(const NpcDevices *devices) {
 }
 
 static int npc_devices_is_mmio_byte(uint64_t address) {
+#ifdef CONFIG_NPC_PLATFORM_YSYXSOC
+  return (address >= UINT64_C(0x02000000) && address <= UINT64_C(0x0200ffff)) ||
+         (address >= UINT64_C(0x10000000) && address <= UINT64_C(0x10000fff)) ||
+         (address >= UINT64_C(0x10001000) && address <= UINT64_C(0x10001fff)) ||
+         (address >= UINT64_C(0x10002000) && address <= UINT64_C(0x1000200f)) ||
+         (address >= UINT64_C(0x10011000) && address <= UINT64_C(0x10011007)) ||
+         (address >= UINT64_C(0x21000000) && address <= UINT64_C(0x211fffff)) ||
+         (address >= UINT64_C(0x40000000) && address <= UINT64_C(0x7fffffff));
+#else
   return (address >= NPC_UART_ADDR && address < (uint64_t)NPC_UART_ADDR + 4u) ||
          (address >= NPC_TIMER_LO_ADDR && address < (uint64_t)NPC_TIMER_HI_ADDR + 4u);
+#endif
 }
 
 void npc_devices_init(NpcDevices *devices) {

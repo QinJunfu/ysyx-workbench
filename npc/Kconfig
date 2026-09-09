@@ -1,5 +1,59 @@
 mainmenu "NPC Configuration Menu"
 
+choice
+	prompt "Simulation platform"
+	default NPC_PLATFORM_DIRECT
+
+config NPC_PLATFORM_DIRECT
+	bool "Direct NPC"
+	help
+	  Run the CPU with the lightweight DPI-backed memory and UART wrapper.
+
+config NPC_PLATFORM_YSYXSOC
+	bool "ysyxSoC"
+	help
+	  Build ysyx_24100022 into ysyxSoCFull and use the SoC peripherals.
+
+endchoice
+
+if NPC_PLATFORM_YSYXSOC
+
+choice
+	prompt "ysyxSoC boot medium"
+	default NPC_YSYXSOC_BOOT_MROM
+
+config NPC_YSYXSOC_BOOT_MROM
+	bool "MROM (reset PC 0x20000000)"
+
+config NPC_YSYXSOC_BOOT_FLASH
+	bool "Flash XIP (reset PC 0x30000000)"
+
+endchoice
+
+choice
+	prompt "ysyxSoC SDRAM capacity"
+	default NPC_YSYXSOC_SDRAM_128MB
+
+config NPC_YSYXSOC_SDRAM_32MB
+	bool "32 MiB (one SDRAM chip)"
+
+config NPC_YSYXSOC_SDRAM_64MB
+	bool "64 MiB (two-chip bit expansion)"
+
+config NPC_YSYXSOC_SDRAM_128MB
+	bool "128 MiB (four-chip word expansion)"
+
+endchoice
+
+config NPC_YSYXSOC_CHIPLINK
+	bool "Enable the ChipLink peer"
+	default n
+	help
+	  Elaborate the ysyxSoC ChipLink master together with the simulated
+	  far-end chip resources.
+
+endif
+
 menu "NPC Debugging"
 
 config NPC_DIFFTEST

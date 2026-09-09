@@ -10,10 +10,18 @@ extern "C" {
 
 #define NPC_PMEM_BASE 0x80000000u
 #define NPC_PMEM_SIZE ((size_t)128 * 1024u * 1024u)
+#define NPC_MROM_BASE 0x20000000u
+#define NPC_MROM_SIZE ((size_t)4 * 1024u)
+#define NPC_FLASH_BASE 0x30000000u
+#define NPC_FLASH_SIZE ((size_t)256 * 1024u * 1024u)
 #define NPC_GPR_COUNT 16u
 #define NPC_ERROR_SIZE 512u
 #define NPC_PATH_SIZE 4096u
 #define NPC_ITRACE_DEPTH 16u
+
+#ifndef NPC_RESET_PC
+#define NPC_RESET_PC NPC_PMEM_BASE
+#endif
 
 typedef struct {
   uint32_t pc;

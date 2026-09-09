@@ -11,12 +11,14 @@ class Rv32eCoreIO extends Bundle {
   val imemAddr = Output(UInt(32.W))
   val imemData = Input(UInt(32.W))
 
-  val dmemAddr       = Output(UInt(32.W))
-  val dmemRdata      = Input(UInt(32.W))
-  val dmemReadValid  = Output(Bool())
-  val dmemAddr2      = Output(UInt(32.W))
-  val dmemRdata2     = Input(UInt(32.W))
-  val dmemReadValid2 = Output(Bool())
+  val dmemAddr        = Output(UInt(32.W))
+  val dmemLogicalAddr = Output(UInt(32.W))
+  val dmemAccessSize  = Output(UInt(3.W))
+  val dmemRdata       = Input(UInt(32.W))
+  val dmemReadValid   = Output(Bool())
+  val dmemAddr2       = Output(UInt(32.W))
+  val dmemRdata2      = Input(UInt(32.W))
+  val dmemReadValid2  = Output(Bool())
 
   val dmemWrite0Valid = Output(Bool())
   val dmemWrite0Addr  = Output(UInt(32.W))
@@ -39,7 +41,7 @@ class Rv32eCoreIO extends Bundle {
   val retirePc    = Output(UInt(32.W))
   val retireInst  = Output(UInt(32.W))
   val retireDnPc  = Output(UInt(32.W))
-  val retireGprs = Output(Vec(16, UInt(32.W)))
+  val retireGprs  = Output(Vec(16, UInt(32.W)))
 
   // halt and invalid describe the current retire event.
   val halt     = Output(Bool())

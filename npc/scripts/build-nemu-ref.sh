@@ -8,6 +8,17 @@ nemu_dir=$(CDPATH= cd -- "$npc_dir/../nemu" && pwd)
 backup_dir=$(mktemp -d "${TMPDIR:-/tmp}/npc-nemu-ref.XXXXXX")
 ref_binary="$nemu_dir/build/riscv32-nemu-interpreter-so"
 ref_obj_dir="$nemu_dir/build/obj-riscv32-nemu-interpreter-so"
+ref_defconfig=riscv32-npc-ref_defconfig
+
+if grep -q '^CONFIG_NPC_PLATFORM_YSYXSOC=y$' "$npc_dir/.config"; then
+  if grep -q '^CONFIG_NPC_YSYXSOC_SDRAM_32MB=y$' "$npc_dir/.config"; then
+    ref_defconfig=riscv32-ysyxsoc-ref32_defconfig
+  elif grep -q '^CONFIG_NPC_YSYXSOC_SDRAM_64MB=y$' "$npc_dir/.config"; then
+    ref_defconfig=riscv32-ysyxsoc-ref64_defconfig
+  else
+    ref_defconfig=riscv32-ysyxsoc-ref128_defconfig
+  fi
+fi
 
 config_present=0
 config_old_present=0
@@ -57,7 +68,7 @@ trap restore_config EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM HUP
 
-make -C "$nemu_dir" NEMU_HOME="$nemu_dir" riscv32-npc-ref_defconfig
+make -C "$nemu_dir" NEMU_HOME="$nemu_dir" "$ref_defconfig"
 # A changed file list is not a Make prerequisite of the old shared object.
 # Remove only this configuration's outputs so an older link cannot be reused.
 rm -f -- "$ref_binary"

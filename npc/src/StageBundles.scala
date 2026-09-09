@@ -100,6 +100,8 @@ class ExuResult extends Bundle {
 
 /** LSU's physical bus requests and logical load result. */
 class LsuResult extends Bundle {
+  val logicalAddress = UInt(32.W)
+  val accessSize     = UInt(3.W)
   val alignedAddress = UInt(32.W)
   val address2       = UInt(32.W)
   val read0Valid     = Bool()

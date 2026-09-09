@@ -20,9 +20,7 @@
 
 static void difftest_check_mem_range(paddr_t addr, size_t n) {
   if (n == 0) return;
-
-  assert(addr >= PMEM_LEFT && addr <= PMEM_RIGHT);
-  assert(n <= (size_t)(PMEM_RIGHT - addr) + 1);
+  assert(in_pmem_range(addr, n));
 }
 
 __EXPORT void difftest_memcpy(paddr_t addr, void *buf, size_t n, bool direction) {

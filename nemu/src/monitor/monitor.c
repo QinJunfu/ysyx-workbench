@@ -125,6 +125,10 @@ static long load_img() {
 
   fseek(fp, 0, SEEK_END);
   long size = ftell(fp);
+  Assert(size >= 0, "Can not determine the size of '%s'", img_file);
+  Assert(in_pmem_range(RESET_VECTOR, (size_t)size),
+      "image '%s' (%ld bytes) does not fit at reset vector " FMT_PADDR,
+      img_file, size, RESET_VECTOR);
 
   Log("The image is %s, size = %ld", img_file, size);
 
