@@ -81,4 +81,48 @@ config NPC_FTRACE
 	help
 	  Function tracing requires an ELF file at run time.
 
+choice
+	prompt "Simulation cycle limit"
+	default NPC_MAX_CYCLES_LIMITED
+
+config NPC_MAX_CYCLES_LIMITED
+	bool "Set a maximum simulation cycle count"
+	help
+	  Stop the simulation when the configured number of cycles has elapsed.
+
+config NPC_MAX_CYCLES_UNLIMITED
+	bool "Run without a simulation cycle limit"
+	help
+	  Do not stop the simulation based on its cycle count. Use this for
+	  interactive programs that are expected to keep running, such as
+	  RT-Thread.
+
+endchoice
+
+config NPC_MAX_CYCLES
+	int "Maximum simulation cycles"
+	depends on NPC_MAX_CYCLES_LIMITED
+	range 1 2147483647
+	default 100000000
+	help
+	  Maximum number of simulated clock cycles before NPC stops the run.
+	  A command-line MAX_CYCLES=... value overrides this setting for one run.
+
+config NPC_WAVEFORM
+	bool "Generate VCD waveform"
+	default n
+	help
+	  Record every evaluated RTL time step to a VCD file. Waveforms can grow
+	  quickly for long-running programs such as RT-Thread, so keep this off
+	  for normal runs and use a bounded simulation while debugging.
+
+config NPC_WAVEFORM_FILE
+	string "VCD waveform output file"
+	depends on NPC_WAVEFORM
+	default "build/waveform.vcd"
+	help
+	  Path of the VCD waveform relative to the NPC directory, or an absolute
+	  path. Its parent directory is created before the simulator starts. A
+	  command-line WAVEFORM=... value overrides this setting for one run.
+
 endmenu

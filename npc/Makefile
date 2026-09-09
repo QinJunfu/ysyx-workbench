@@ -180,8 +180,20 @@ MROM_IMAGE ?=
 FLASH_IMAGE ?=
 BATCH ?= 0
 NVBOARD ?= 0
+ifeq ($(CONFIG_NPC_WAVEFORM),y)
+KCONFIG_WAVEFORM := $(subst ",,$(CONFIG_NPC_WAVEFORM_FILE))
+WAVEFORM ?= $(KCONFIG_WAVEFORM)
+else
 WAVEFORM ?=
-MAX_CYCLES ?= 100000000
+endif
+ifeq ($(CONFIG_NPC_MAX_CYCLES_UNLIMITED),y)
+KCONFIG_MAX_CYCLES := 0
+else ifneq ($(strip $(CONFIG_NPC_MAX_CYCLES)),)
+KCONFIG_MAX_CYCLES := $(CONFIG_NPC_MAX_CYCLES)
+else
+KCONFIG_MAX_CYCLES := 100000000
+endif
+MAX_CYCLES ?= $(KCONFIG_MAX_CYCLES)
 PROGRESS_INTERVAL ?= 1000000
 
 EFFECTIVE_IMAGE = $(if $(strip $(IMAGE)),$(IMAGE),$(if $(strip $(MROM_IMAGE)),$(MROM_IMAGE),$(FLASH_IMAGE)))
@@ -277,6 +289,7 @@ sim: $(SIM)
 
 run: sim
 	@test -n "$(EFFECTIVE_IMAGE)" || { echo "IMAGE, MROM_IMAGE, or FLASH_IMAGE is required" >&2; exit 2; }
+	@if [ -n "$(strip $(WAVEFORM))" ]; then mkdir -p "$(dir $(WAVEFORM))"; fi
 	$(SIM) $(RUN_ARGS)
 
 batch: BATCH = 1
@@ -307,7 +320,8 @@ help:
 	@echo '  batch           - Run headless until trap or MAX_CYCLES'
 	@echo '  ysyxSoC-run     - Interactive wrapper requiring the ysyxSoC Kconfig platform'
 	@echo '  ysyxSoC-batch   - Headless wrapper requiring the ysyxSoC Kconfig platform'
-	@echo '  WAVEFORM=<vcd>  - Enable VCD output (disabled by default)'
+	@echo '  MAX_CYCLES=<N>  - Override menuconfig cycle limit for one run (0 is unlimited)'
+	@echo '  WAVEFORM=<vcd>  - Override the menuconfig waveform output path for one run'
 	$(MILL) -i runMain Elaborate --help
 
 reformat:
