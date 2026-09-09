@@ -113,9 +113,7 @@ class SteppableCore(val resetPc: BigInt = BigInt("80000000", 16)) extends Module
 
 /** Top-level port: the legacy debug/retire view plus one AXI4-Lite master. */
 class NpcIO extends Rv32eCoreIO {
-  val master      = new AxiLiteMasterIO
-  val uartTxValid = Output(Bool())
-  val uartTxData  = Output(UInt(8.W))
+  val master = new AxiLiteMasterIO
 }
 
 /** Multi-cycle RV32E NPC. IFU and LSU requests are serialized by this explicit arbiter/state machine because the core
@@ -124,14 +122,11 @@ class NpcIO extends Rv32eCoreIO {
   */
 class NPC(
   val resetPc:            BigInt = BigInt("80000000", 16),
-  val internalUart:       Boolean = true,
-  val clintBase:          BigInt = BigInt("20000000", 16),
   val useNarrowAddresses: Boolean = false)
     extends Module {
   val io = IO(new NpcIO)
 
   val core      = Module(new SteppableCore(resetPc))
-  val xbar      = Module(new AxiLiteXbar(internalUart, clintBase))
   val imemData  = RegInit(0.U(32.W))
   val dmemData0 = RegInit(0.U(32.W))
   val dmemData1 = RegInit(0.U(32.W))
@@ -165,17 +160,17 @@ class NPC(
   val storeCycle   = state === sStoreExec
   core.io.step := executeCycle || loadCycle || storeCycle
 
-  xbar.io.cpu.awvalid := false.B
-  xbar.io.cpu.awaddr  := 0.U
-  xbar.io.cpu.awsize  := 2.U
-  xbar.io.cpu.wvalid  := false.B
-  xbar.io.cpu.wdata   := 0.U
-  xbar.io.cpu.wstrb   := 0.U
-  xbar.io.cpu.bready  := false.B
-  xbar.io.cpu.arvalid := false.B
-  xbar.io.cpu.araddr  := 0.U
-  xbar.io.cpu.arsize  := 2.U
-  xbar.io.cpu.rready  := false.B
+  io.master.awvalid := false.B
+  io.master.awaddr  := 0.U
+  io.master.awsize  := 2.U
+  io.master.wvalid  := false.B
+  io.master.wdata   := 0.U
+  io.master.wstrb   := 0.U
+  io.master.bready  := false.B
+  io.master.arvalid := false.B
+  io.master.araddr  := 0.U
+  io.master.arsize  := 2.U
+  io.master.rready  := false.B
 
   val loadAddress0  = if (useNarrowAddresses) {
     Mux(core.io.dmemReadValid2, core.io.dmemAddr, core.io.dmemLogicalAddr)
@@ -188,65 +183,64 @@ class NPC(
     core.io.dmemWrite0Addr
   }
 
-  // This compact Xbar selects each response channel from the current request
-  // address, so keep the address stable until the response is accepted.
+  // Keep the write address stable until the write response is accepted.
   when(state === sStoreReq0 || state === sStoreResp0) {
-    xbar.io.cpu.awaddr := storeAddress0
-    xbar.io.cpu.awsize := Mux(core.io.dmemWrite1Valid, 2.U, core.io.dmemAccessSize)
+    io.master.awaddr := storeAddress0
+    io.master.awsize := Mux(core.io.dmemWrite1Valid, 2.U, core.io.dmemAccessSize)
   }.elsewhen(state === sStoreReq1 || state === sStoreResp1) {
-    xbar.io.cpu.awaddr := core.io.dmemWrite1Addr
-    xbar.io.cpu.awsize := 2.U
+    io.master.awaddr := core.io.dmemWrite1Addr
+    io.master.awsize := 2.U
   }
 
   when(state === sFetchReq) {
-    xbar.io.cpu.arvalid := true.B
-    xbar.io.cpu.araddr  := core.io.imemAddr
-    xbar.io.cpu.arsize  := 2.U
+    io.master.arvalid := true.B
+    io.master.araddr  := core.io.imemAddr
+    io.master.arsize  := 2.U
   }.elsewhen(state === sFetchResp) {
-    xbar.io.cpu.araddr := core.io.imemAddr
-    xbar.io.cpu.arsize := 2.U
-    xbar.io.cpu.rready := true.B
+    io.master.araddr := core.io.imemAddr
+    io.master.arsize := 2.U
+    io.master.rready := true.B
   }.elsewhen(state === sLoadReq0) {
-    xbar.io.cpu.arvalid := true.B
-    xbar.io.cpu.araddr  := loadAddress0
-    xbar.io.cpu.arsize  := Mux(core.io.dmemReadValid2, 2.U, core.io.dmemAccessSize)
+    io.master.arvalid := true.B
+    io.master.araddr  := loadAddress0
+    io.master.arsize  := Mux(core.io.dmemReadValid2, 2.U, core.io.dmemAccessSize)
   }.elsewhen(state === sLoadResp0) {
-    xbar.io.cpu.araddr := loadAddress0
-    xbar.io.cpu.arsize := Mux(core.io.dmemReadValid2, 2.U, core.io.dmemAccessSize)
-    xbar.io.cpu.rready := true.B
+    io.master.araddr := loadAddress0
+    io.master.arsize := Mux(core.io.dmemReadValid2, 2.U, core.io.dmemAccessSize)
+    io.master.rready := true.B
   }.elsewhen(state === sLoadReq1) {
-    xbar.io.cpu.arvalid := true.B
-    xbar.io.cpu.araddr  := core.io.dmemAddr2
-    xbar.io.cpu.arsize  := 2.U
+    io.master.arvalid := true.B
+    io.master.araddr  := core.io.dmemAddr2
+    io.master.arsize  := 2.U
   }.elsewhen(state === sLoadResp1) {
-    xbar.io.cpu.araddr := core.io.dmemAddr2
-    xbar.io.cpu.arsize := 2.U
-    xbar.io.cpu.rready := true.B
+    io.master.araddr := core.io.dmemAddr2
+    io.master.arsize := 2.U
+    io.master.rready := true.B
   }.elsewhen(state === sStoreReq0) {
-    xbar.io.cpu.awvalid := !awSent
-    xbar.io.cpu.awaddr  := storeAddress0
-    xbar.io.cpu.wvalid  := !wSent
-    xbar.io.cpu.wdata   := core.io.dmemWrite0Data
-    xbar.io.cpu.wstrb   := core.io.dmemWrite0Mask
+    io.master.awvalid := !awSent
+    io.master.awaddr  := storeAddress0
+    io.master.wvalid  := !wSent
+    io.master.wdata   := core.io.dmemWrite0Data
+    io.master.wstrb   := core.io.dmemWrite0Mask
   }.elsewhen(state === sStoreResp0) {
-    xbar.io.cpu.bready := true.B
+    io.master.bready := true.B
   }.elsewhen(state === sStoreReq1) {
-    xbar.io.cpu.awvalid := !awSent
-    xbar.io.cpu.awaddr  := core.io.dmemWrite1Addr
-    xbar.io.cpu.wvalid  := !wSent
-    xbar.io.cpu.wdata   := core.io.dmemWrite1Data
-    xbar.io.cpu.wstrb   := core.io.dmemWrite1Mask
+    io.master.awvalid := !awSent
+    io.master.awaddr  := core.io.dmemWrite1Addr
+    io.master.wvalid  := !wSent
+    io.master.wdata   := core.io.dmemWrite1Data
+    io.master.wstrb   := core.io.dmemWrite1Mask
   }.elsewhen(state === sStoreResp1) {
-    xbar.io.cpu.bready := true.B
+    io.master.bready := true.B
   }
 
   when(state === sFetchReq) {
-    when(xbar.io.cpu.arvalid && xbar.io.cpu.arready) {
+    when(io.master.arvalid && io.master.arready) {
       state := sFetchResp
     }
   }.elsewhen(state === sFetchResp) {
-    when(xbar.io.cpu.rvalid && xbar.io.cpu.rready) {
-      imemData := xbar.io.cpu.rdata
+    when(io.master.rvalid && io.master.rready) {
+      imemData := io.master.rdata
       state    := sExec
     }
   }.elsewhen(state === sExec) {
@@ -264,12 +258,12 @@ class NPC(
       }
     }
   }.elsewhen(state === sLoadReq0) {
-    when(xbar.io.cpu.arvalid && xbar.io.cpu.arready) {
+    when(io.master.arvalid && io.master.arready) {
       state := sLoadResp0
     }
   }.elsewhen(state === sLoadResp0) {
-    when(xbar.io.cpu.rvalid && xbar.io.cpu.rready) {
-      dmemData0 := xbar.io.cpu.rdata
+    when(io.master.rvalid && io.master.rready) {
+      dmemData0 := io.master.rdata
       when(core.io.dmemReadValid2) {
         state := sLoadReq1
       }.otherwise {
@@ -277,28 +271,28 @@ class NPC(
       }
     }
   }.elsewhen(state === sLoadReq1) {
-    when(xbar.io.cpu.arvalid && xbar.io.cpu.arready) {
+    when(io.master.arvalid && io.master.arready) {
       state := sLoadResp1
     }
   }.elsewhen(state === sLoadResp1) {
-    when(xbar.io.cpu.rvalid && xbar.io.cpu.rready) {
-      dmemData1 := xbar.io.cpu.rdata
+    when(io.master.rvalid && io.master.rready) {
+      dmemData1 := io.master.rdata
       state     := sLoadExec
     }
   }.elsewhen(state === sLoadExec) {
     state := sFetchReq
   }.elsewhen(state === sStoreReq0) {
-    when(xbar.io.cpu.awvalid && xbar.io.cpu.awready) {
+    when(io.master.awvalid && io.master.awready) {
       awSent := true.B
     }
-    when(xbar.io.cpu.wvalid && xbar.io.cpu.wready) {
+    when(io.master.wvalid && io.master.wready) {
       wSent := true.B
     }
-    when((awSent || xbar.io.cpu.awready) && (wSent || xbar.io.cpu.wready)) {
+    when((awSent || io.master.awready) && (wSent || io.master.wready)) {
       state := sStoreResp0
     }
   }.elsewhen(state === sStoreResp0) {
-    when(xbar.io.cpu.bvalid && xbar.io.cpu.bready) {
+    when(io.master.bvalid && io.master.bready) {
       when(core.io.dmemWrite1Valid) {
         awSent := false.B
         wSent  := false.B
@@ -308,46 +302,22 @@ class NPC(
       }
     }
   }.elsewhen(state === sStoreReq1) {
-    when(xbar.io.cpu.awvalid && xbar.io.cpu.awready) {
+    when(io.master.awvalid && io.master.awready) {
       awSent := true.B
     }
-    when(xbar.io.cpu.wvalid && xbar.io.cpu.wready) {
+    when(io.master.wvalid && io.master.wready) {
       wSent := true.B
     }
-    when((awSent || xbar.io.cpu.awready) && (wSent || xbar.io.cpu.wready)) {
+    when((awSent || io.master.awready) && (wSent || io.master.wready)) {
       state := sStoreResp1
     }
   }.elsewhen(state === sStoreResp1) {
-    when(xbar.io.cpu.bvalid && xbar.io.cpu.bready) {
+    when(io.master.bvalid && io.master.bready) {
       state := sStoreExec
     }
   }.elsewhen(state === sStoreExec) {
     state := sFetchReq
   }
-
-  // The Xbar owns the UART/CLINT address decode.  Its memory side is the
-  // external AXI port exported by NPC.
-  io.master.awvalid      := xbar.io.memory.awvalid
-  io.master.awaddr       := xbar.io.memory.awaddr
-  io.master.awsize       := xbar.io.memory.awsize
-  io.master.wvalid       := xbar.io.memory.wvalid
-  io.master.wdata        := xbar.io.memory.wdata
-  io.master.wstrb        := xbar.io.memory.wstrb
-  io.master.bready       := xbar.io.memory.bready
-  io.master.arvalid      := xbar.io.memory.arvalid
-  io.master.araddr       := xbar.io.memory.araddr
-  io.master.arsize       := xbar.io.memory.arsize
-  io.master.rready       := xbar.io.memory.rready
-  xbar.io.memory.awready := io.master.awready
-  xbar.io.memory.wready  := io.master.wready
-  xbar.io.memory.bvalid  := io.master.bvalid
-  xbar.io.memory.bresp   := io.master.bresp
-  xbar.io.memory.arready := io.master.arready
-  xbar.io.memory.rvalid  := io.master.rvalid
-  xbar.io.memory.rdata   := io.master.rdata
-  xbar.io.memory.rresp   := io.master.rresp
-  io.uartTxValid         := xbar.io.uartTxValid
-  io.uartTxData          := xbar.io.uartTxData
 
   // Preserve the existing retire/DPI view for the simulator and unit users.
   io.imemAddr        := core.io.imemAddr

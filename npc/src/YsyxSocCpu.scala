@@ -146,8 +146,6 @@ class ysyx_24100022(resetPc: BigInt = BigInt("20000000", 16)) extends Module {
   val core = Module(
     new NPC(
       resetPc = resetPc,
-      internalUart = false,
-      clintBase = BigInt("0200bff8", 16),
       useNarrowAddresses = true
     )
   )

@@ -50,9 +50,6 @@ module NpcTop (
   logic io_halt;
   logic [31:0] io_halt_code;
   logic io_invalid;
-  logic io_uart_tx_valid;
-  logic [7:0] io_uart_tx_data;
-
   logic io_master_awvalid;
   logic io_master_awready;
   logic [31:0] io_master_awaddr;
@@ -98,7 +95,6 @@ module NpcTop (
     .io_retireGprs_13(io_retire_gprs[13]), .io_retireGprs_14(io_retire_gprs[14]),
     .io_retireGprs_15(io_retire_gprs[15]), .io_halt(io_halt),
     .io_haltCode(io_halt_code), .io_invalid(io_invalid),
-    .io_uartTxValid(io_uart_tx_valid), .io_uartTxData(io_uart_tx_data),
     .io_master_awvalid(io_master_awvalid), .io_master_awready(io_master_awready),
     .io_master_awaddr(io_master_awaddr), .io_master_awsize(io_master_awsize),
     .io_master_wvalid(io_master_wvalid),
@@ -152,13 +148,6 @@ module NpcTop (
       mtime <= 64'b0;
     end else begin
       mtime <= mtime + 64'd1;
-
-`ifndef SYNTHESIS
-      if (io_uart_tx_valid) begin
-        $write("%c", io_uart_tx_data);
-        $fflush();
-      end
-`endif
 
       if (read_valid_reg && io_master_rready) begin
         read_valid_reg <= 1'b0;
