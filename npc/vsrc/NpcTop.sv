@@ -26,6 +26,16 @@ module NpcTop (
 `endif
 `endif
 
+`ifdef __ICARUS__
+  // Icarus Verilog warns that simulation system tasks and the VPI
+  // $pmem_write task cannot be synthesized when they appear in an always_ff
+  // process. NpcTop is simulation-only glue, so the Icarus build uses a plain
+  // always block; Verilator keeps always_ff.
+  `define NPC_SEQ always @(posedge clock)
+`else
+  `define NPC_SEQ always_ff @(posedge clock)
+`endif
+
   logic [31:0] io_imem_addr;
   logic [31:0] io_imem_data;
   logic [31:0] io_dmem_addr;
@@ -141,7 +151,7 @@ module NpcTop (
   assign io_master_bvalid = write_resp_valid;
   assign io_master_bresp = write_resp_reg;
 
-  always_ff @(posedge clock) begin
+  `NPC_SEQ begin
     if (reset) begin
       read_data_reg <= 32'b0;
       read_valid_reg <= 1'b0;
@@ -226,7 +236,7 @@ module NpcTop (
     end
   end
 
-  always_ff @(posedge clock) begin
+  `NPC_SEQ begin
     if (!reset && io_retire_valid) begin
 `ifdef __ICARUS__
       if (io_halt) begin

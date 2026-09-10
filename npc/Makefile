@@ -101,7 +101,7 @@ endif
 
 # Gate-level netlist simulation.  When CONFIG_NPC_NETLIST is enabled the
 # Chisel-generated RTL is replaced by the netlist ECC produced, and the
-# ICsprout55 standard cell behavioral models are added to the Verilator build.
+# ICsprout55 standard cell behavioral models are added to the build.
 ifeq ($(CONFIG_NPC_NETLIST),y)
 NETLIST_ENABLED := y
 else
@@ -117,9 +117,6 @@ NETLIST_GZ := $(patsubst "%",%,$(CONFIG_NPC_NETLIST_FILE))
 NETLIST_V := $(NETLIST_DIR)/npc_Synthesis_sim.v
 
 ifeq ($(NETLIST_ENABLED),y)
-ifeq ($(SIMULATOR),iverilog)
-$(error Gate-level netlist simulation needs Verilator; select it in menuconfig)
-endif
 ifeq ($(PLATFORM),ysyxsoc)
 $(error Gate-level netlist simulation only supports the Direct NPC platform)
 endif
@@ -154,7 +151,7 @@ endif
 endif
 
 CONFIG_ONLY_GOALS := menuconfig default_defconfig iverilog_defconfig \
-	netlist_defconfig \
+	netlist_defconfig iverilog_netlist_defconfig \
 	ysyxsoc_defconfig \
 	ysyxsoc_mrom_defconfig ysyxsoc_flash_defconfig \
 	ysyxsoc_flash_32_defconfig ysyxsoc_flash_64_defconfig \
@@ -213,16 +210,23 @@ DIRECT_VSRC := vsrc/NpcTop.sv
 # In netlist mode the single gate-level NPC module takes the place of all the
 # Chisel RTL modules, so the RTL file list must not be compiled as well.
 ifeq ($(NETLIST_ENABLED),y)
-RTL_SIM_SRCS := $(NETLIST_V) $(STD_CELL_SRCS)
-RTL_SIM_DEPS := $(NETLIST_V) $(STD_CELL_SRCS)
+RTL_SIM_SRCS = $(NETLIST_V) $(STD_CELL_SRCS)
+RTL_SIM_DEPS = $(NETLIST_V) $(STD_CELL_SRCS)
 # The standard cell models contain timing checks that only the functional
 # models avoid; --no-timing drops them and the timescale is pinned so the
 # netlist and the models agree.
 VERILATOR_NETLIST_FLAGS := --timescale "1ns/1ns" --no-timing -D__VERILATOR__ -Dfunctional
+# iverilog has no --no-timing, but the specify blocks are compiled away by the
+# functional define.  __ICARUS__ is defined automatically by iverilog.
+IVERILOG_NETLIST_FLAGS := -Dfunctional
 else
-RTL_SIM_SRCS := $(RTL_SV)
-RTL_SIM_DEPS := $(RTL_FILELIST)
+# Recursively expanded on purpose: RTL_SV reads the generated filelist.f with
+# $(shell ...), and the Chisel RTL may be regenerated during this same make
+# run, so the list must be evaluated when the recipe runs, not at parse time.
+RTL_SIM_SRCS = $(RTL_SV)
+RTL_SIM_DEPS = $(RTL_FILELIST)
 VERILATOR_NETLIST_FLAGS :=
+IVERILOG_NETLIST_FLAGS :=
 endif
 
 # Sources compiled into the VPI module that implements $pmem_read/$pmem_write.
@@ -398,14 +402,15 @@ $(VPI_MODULE): $(VPI_MODULE_SRCS) $(C_HEADERS) | $(IVL_DIR)
 		$(VPI_INCLUDES) \
 		$(abspath csrc/vpi.c) $(abspath csrc/common.c) $(abspath csrc/memory.c)
 
-$(IVL_SIM): Makefile $(RTL_FILELIST) $(VSRC) $(CONFIG_HEADER) $(VPI_MODULE) | $(IVL_DIR)
-	@$(foreach source,$(RTL_SV) $(VSRC),printf '+V %s\n' '$(notdir $(source))';)
+$(IVL_SIM): Makefile $(RTL_SIM_DEPS) $(VSRC) $(CONFIG_HEADER) $(VPI_MODULE) | $(IVL_DIR)
+	@$(foreach source,$(RTL_SIM_SRCS) $(VSRC),printf '+V %s\n' '$(notdir $(source))';)
 	@# -g2012 enables the SystemVerilog features firtool emits.
 	@# The lecture notes call out that the "sorry: constant selects ..."
 	@# diagnostics iverilog may print here are harmless and can be ignored.
 	@$(IVERILOG) -g2012 -s $(IVL_TOP) \
+		$(IVERILOG_NETLIST_FLAGS) \
 		-L$(abspath $(IVL_DIR)) -m$(VPI_NAME) \
-		-o $@ $(RTL_SV) $(VSRC)
+		-o $@ $(RTL_SIM_SRCS) $(VSRC)
 
 else
 
@@ -480,6 +485,7 @@ help:
 	@echo '  default_defconfig - Load the default NPC configuration'
 	@echo '  iverilog_defconfig - Select the direct NPC with the Icarus Verilog simulator'
 	@echo '  netlist_defconfig - Select the direct NPC with the ECC gate-level netlist'
+	@echo '  iverilog_netlist_defconfig - Select the ECC gate-level netlist with Icarus Verilog'
 	@echo '  ysyxsoc_mrom_defconfig  - Select ysyxSoC with reset PC in MROM'
 	@echo '  ysyxsoc_flash_{32,64,128}_defconfig - Select flash XIP and SDRAM capacity'
 	@echo '  ysyxsoc_chiplink_defconfig - Select the MROM/128 MiB ChipLink SoC'

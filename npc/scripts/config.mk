@@ -36,6 +36,10 @@ netlist_defconfig: $(CONF) $(FIXDEP)
 	$(CONF) -s --defconfig=configs/netlist_defconfig $(KCONFIG)
 	$(CONF) -s --syncconfig $(KCONFIG)
 
+iverilog_netlist_defconfig: $(CONF) $(FIXDEP)
+	$(CONF) -s --defconfig=configs/iverilog_netlist_defconfig $(KCONFIG)
+	$(CONF) -s --syncconfig $(KCONFIG)
+
 ysyxsoc_defconfig: $(CONF) $(FIXDEP)
 	$(CONF) -s --defconfig=configs/ysyxsoc_defconfig $(KCONFIG)
 	$(CONF) -s --syncconfig $(KCONFIG)
@@ -81,6 +85,7 @@ config-clean:
 distclean: clean config-clean
 
 .PHONY: menuconfig default_defconfig iverilog_defconfig netlist_defconfig \
+	iverilog_netlist_defconfig \
 	ysyxsoc_defconfig \
 	ysyxsoc_mrom_defconfig ysyxsoc_flash_defconfig \
 	ysyxsoc_flash_32_defconfig ysyxsoc_flash_64_defconfig \

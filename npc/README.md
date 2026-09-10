@@ -25,6 +25,7 @@ NPC 的平台、仿真器、DiffTest 和文本 trace 使用独立的 Kconfig 配
 make -C npc default_defconfig    # Direct NPC + Verilator（全部调试功能默认关闭）
 make -C npc iverilog_defconfig   # Direct NPC + Icarus Verilog 四值仿真
 make -C npc netlist_defconfig    # Direct NPC + Verilator 门级网表仿真
+make -C npc iverilog_netlist_defconfig   # Direct NPC + Icarus Verilog 四值网表仿真
 make -C npc ysyxsoc_mrom_defconfig   # ysyxSoC 平台（只支持 Verilator）
 make -C npc menuconfig           # 交互式启用配置项
 ```
@@ -150,7 +151,7 @@ iverilog 编译时可能输出讲义中提到的
 任务在 `always_ff` 中的 `warning: ... cannot be synthesized`。这些都是仿真专用代码的正常
 提示，可以忽略；只看是否出现了 `error:` 以及命令的退出状态。
 
-## Verilator 网表仿真
+## 网表仿真
 
 RTL 仿真接受的 Verilog 不一定可综合。为了检查 NPC 中是否含有综合前后行为不一致的代码，
 需要把 ECC 综合出的门级网表接回仿真环境，用网表替换 Chisel 生成的 RTL：
@@ -182,7 +183,7 @@ ECC 会同时产生两个网表：`npc_Synthesis_sim.v.gz` 面向仿真，顶层
 网表仿真使用前者。它是压缩文件，Verilator 无法直接读取，`npc/Makefile` 会自动 gunzip 到
 `npc/build/netlist/npc_Synthesis_sim.v`。
 
-### 2. 用 Verilator 编译网表
+### 2. 用 Verilator 编译网表（二值功能检查）
 
 ```bash
 make -C npc netlist_defconfig   # Direct NPC + Verilator + CONFIG_NPC_NETLIST
@@ -226,6 +227,36 @@ make -C am-kernels/benchmarks/microbench ARCH=riscv32e-npc mainargs=test batch
 网表中通用寄存器堆已被打平成触发器，且网表里无法再使用 DPI-C，因此网表仿真不方便使用
 DiffTest（`netlist_defconfig` 默认关闭）；按讲义建议，应先在 RTL 仿真中用 DiffTest 把问题
 排除干净，再做网表仿真。
+
+### 4. 用 Icarus Verilog 做四值网表仿真
+
+Verilator 是二值仿真器，看不到不定态。讲义还要求在 iverilog 上对网表做四值仿真，检查标准
+单元模型和网表中是否存在 X 态传播：
+
+```bash
+make -C npc iverilog_netlist_defconfig   # Direct NPC + Icarus Verilog + CONFIG_NPC_NETLIST
+make -C npc sim
+make -C npc run \
+  IMAGE="$ROOT/am-kernels/tests/cpu-tests/build/dummy-riscv32e-npc.bin" \
+  MAX_CYCLES=200000 WAVEFORM=build/netlist.vcd BATCH=1
+```
+
+讲义指出这一步「无需进行代码上的调整」：访存已经由 VPI 的 `$pmem_read`/`$pmem_write`
+实现，网表只替换 `NPC` 模块，`vsrc/NpcTop.sv`（`__ICARUS__` 分支）和 `vsrc/IverilogTop.sv`
+都不用改。与 Verilator 网表仿真的区别：
+
+- iverilog 只需 `-Dfunctional` 让标准单元模型走功能分支；`-D__ICARUS__` 由 iverilog 自动
+  定义，`--no-timing`/`--timescale` 是 Verilator 专有选项，不需要。
+- 网表里的触发器是无复位端的 `DFFQX0P5H7R`，同步复位由 D 端逻辑实现。仿真时刻 0 所有触发器
+  都是 `X`，复位结束后应全部变成确定值；如果某个触发器没有复位，`X` 就会一直传播并使程序
+  运行失败。
+
+在当前网表上，短仿真波形的分析结果是：23205 个被 dump 的信号里，复位结束后只剩 895 个为
+`X`，且全部是 895 个 `DFFQX0P5H7R` 实例内部**未被使用的 `NOTIFIER`**（标准单元模型里给
+`specify` 时序检查用的通知寄存器，`-Dfunctional` 下不参与功能），没有任何功能信号为 `X`。
+行为上也一致：37 个 cpu-tests 中 36 个 `PASS`（`wrong` 为预期负例），`microbench` 的 10 个
+基准全部 `Passed`，`HIT GOOD TRAP at pc=0x80005738`，`$finish` 时间与 RTL 的四值仿真完全相同。
+因此综合得到的网表不存在 X 态传播问题，也不需要修改 RTL。
 
 ## DiffTest
 
