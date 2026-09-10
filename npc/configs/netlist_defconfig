@@ -1,0 +1,12 @@
+CONFIG_NPC_PLATFORM_DIRECT=y
+# CONFIG_NPC_PLATFORM_YSYXSOC is not set
+CONFIG_NPC_SIM_VERILATOR=y
+# CONFIG_NPC_SIM_IVERILOG is not set
+CONFIG_NPC_NETLIST=y
+CONFIG_NPC_NETLIST_FILE="../ecc/npc/runs/netlist-sim/Synthesis_yosys/output/npc_Synthesis_sim.v.gz"
+CONFIG_NPC_PDK_ROOT="../icsprout55-pdk"
+# CONFIG_NPC_DIFFTEST is not set
+CONFIG_NPC_DIFFTEST_REF_PATH="../nemu/build/riscv32-nemu-interpreter-so"
+# CONFIG_NPC_ITRACE is not set
+# CONFIG_NPC_MTRACE is not set
+# CONFIG_NPC_FTRACE is not set

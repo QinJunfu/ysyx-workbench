@@ -24,13 +24,15 @@ NPC 的平台、仿真器、DiffTest 和文本 trace 使用独立的 Kconfig 配
 ```bash
 make -C npc default_defconfig    # Direct NPC + Verilator（全部调试功能默认关闭）
 make -C npc iverilog_defconfig   # Direct NPC + Icarus Verilog 四值仿真
+make -C npc netlist_defconfig    # Direct NPC + Verilator 门级网表仿真
 make -C npc ysyxsoc_mrom_defconfig   # ysyxSoC 平台（只支持 Verilator）
 make -C npc menuconfig           # 交互式启用配置项
 ```
 
 `menuconfig` 中先选择 `Simulation platform`，再在 `RTL simulator` 中选择
 `Verilator (DPI-C, two-value)` 或 `Icarus Verilog (VPI, four-value)`。Icarus Verilog
-只支持 Direct NPC 平台，因此该选项只在 Direct NPC 下可见。其余可配置项为
+只支持 Direct NPC 平台，因此该选项只在 Direct NPC 下可见；`CONFIG_NPC_NETLIST` 打开后
+用 ECC 综合出的门级网表替换 RTL，见「Verilator 网表仿真」。其余可配置项为
 `CONFIG_NPC_DIFFTEST`、`CONFIG_NPC_DIFFTEST_REF_PATH`、`CONFIG_NPC_ITRACE`、
 `CONFIG_NPC_MTRACE` 和 `CONFIG_NPC_FTRACE`。配置文件保存在 `npc/.config`，生成的头文件
 保存在 `npc/include/generated/autoconf.h`。首次执行 `make`、`make sim` 或 `make run`
@@ -148,6 +150,83 @@ iverilog 编译时可能输出讲义中提到的
 任务在 `always_ff` 中的 `warning: ... cannot be synthesized`。这些都是仿真专用代码的正常
 提示，可以忽略；只看是否出现了 `error:` 以及命令的退出状态。
 
+## Verilator 网表仿真
+
+RTL 仿真接受的 Verilog 不一定可综合。为了检查 NPC 中是否含有综合前后行为不一致的代码，
+需要把 ECC 综合出的门级网表接回仿真环境，用网表替换 Chisel 生成的 RTL：
+
+```text
++--------------------------------+
+| NpcTop                         |
+|  +-------------+       +-----+ |
+|  | NPC-netlist | <---> | Mem | |   Mem 由 NpcTop.sv 通过 DPI-C 实现
+|  +-------------+       +-----+ |
++--------------------------------+
+```
+
+网表仿真只针对 Direct NPC 平台，因为讲义要求单独综合 NPC，不包含 ysyxSoC。
+
+### 1. 综合出网表
+
+`ECC` 工程位于 `ecc/npc/`。它默认使用 Direct NPC 的 RTL（`npc/build/rtl`），顶层是 `NPC`：
+
+```bash
+# 确保 npc 处于 Direct 平台配置
+make -C npc default_defconfig
+# 生成 RTL 并重新综合，结果写入 ecc/npc/runs/netlist-sim/
+make -C ecc/npc netlist
+```
+
+ECC 会同时产生两个网表：`npc_Synthesis_sim.v.gz` 面向仿真，顶层端口与 RTL 的 `NPC`
+完全一致，用于替换 RTL 模块；`npc_Synthesis.v.gz` 面向后端物理设计，向量端口被拆成单 bit。
+网表仿真使用前者。它是压缩文件，Verilator 无法直接读取，`npc/Makefile` 会自动 gunzip 到
+`npc/build/netlist/npc_Synthesis_sim.v`。
+
+### 2. 用 Verilator 编译网表
+
+```bash
+make -C npc netlist_defconfig   # Direct NPC + Verilator + CONFIG_NPC_NETLIST
+make -C npc sim
+```
+
+`menuconfig` 中的 `CONFIG_NPC_NETLIST` 打开后，`npc/Makefile` 会用网表替换全部 Chisel RTL
+模块，并额外编译 ICsprout55 标准单元行为级模型：
+
+```text
+icsprout55-pdk/IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CH/verilog/ics55_LLSC_H7CH.v
+icsprout55-pdk/IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/verilog/ics55_LLSC_H7CR.v
+icsprout55-pdk/IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/verilog/ics55_LLSC_H7CL.v
+```
+
+并给 Verilator 加上讲义要求的选项：
+
+```text
+--timescale "1ns/1ns" --no-timing -D__VERILATOR__ -Dfunctional
+```
+
+`-Dfunctional` 让标准单元模型走功能分支、跳过 `specify` 时序检查，`--no-timing` 进一步忽略
+时序信息，`--timescale` 固定时间单位，避免网表与模型的时间单位不一致。可用
+`CONFIG_NPC_NETLIST_FILE` 指定网表路径，用 `CONFIG_NPC_PDK_ROOT` 指定 PDK 根目录。
+网表模式使用独立的 `npc/build/obj_dir-netlist`，不会和 RTL 仿真的对象文件混用。
+
+### 3. 在网表上运行程序
+
+```bash
+make -C npc run \
+  IMAGE="$ROOT/am-kernels/tests/cpu-tests/build/dummy-riscv32e-npc.bin" BATCH=1
+make -C am-kernels/tests/cpu-tests ARCH=riscv32e-npc batch
+make -C am-kernels/benchmarks/microbench ARCH=riscv32e-npc mainargs=test batch
+```
+
+在当前 RTL 上，网表的 37 个 cpu-tests 中 36 个 `PASS`（`wrong` 为预期负例），`microbench`
+的 10 个基准全部 `Passed`，且 `Scored time`/`Total time` 与 RTL 仿真完全一致，说明综合后的
+电路与 RTL 行为一致。另外检查网表可以看到它只包含上升沿 `DFFQX0P5H7R`，没有 `LAT*` 锁存器，
+满足流片前端对下降沿时钟和锁存器的要求。
+
+网表中通用寄存器堆已被打平成触发器，且网表里无法再使用 DPI-C，因此网表仿真不方便使用
+DiffTest（`netlist_defconfig` 默认关闭）；按讲义建议，应先在 RTL 仿真中用 DiffTest 把问题
+排除干净，再做网表仿真。
+
 ## DiffTest
 
 首次使用或 NEMU 参考端修改后，先构建参考共享库：
@@ -233,5 +312,6 @@ AM 的 `npc.mk` 会自动生成 `.bin` 和 `.elf`，并将它们传给 `npc/Make
 - `CONFIG_NPC_FTRACE requires --elf` 表示启用了函数 trace 但没有设置 `ELF`。
 - `--diff`、`--itrace`、`--mtrace`、`--ftrace` 和 `--trace` 是已删除的旧参数，请使用 `make menuconfig`。
 - Icarus Verilog 配置下没有 SDB、DiffTest 和文本 trace：`BATCH`、`ELF` 只对 Verilator 有效，`HIT GOOD TRAP`/`HIT BAD TRAP` 由 `vsrc/NpcTop.sv` 在 `ebreak` 时直接打印，退出状态分别为 `0`/`1`。
+- `CONFIG_NPC_NETLIST` 打开时如果找不到网表，先用 `make -C ecc/npc netlist` 综合；找不到标准单元模型时检查 `CONFIG_NPC_PDK_ROOT` 是否指向 `icsprout55-pdk`。网表模式不支持 Icarus Verilog 和 ysyxSoC 平台，`make` 会直接报错。
 - `make -C npc lint` 在 Verilator 配置下运行 `verilator --lint-only`，在 Icarus Verilog 配置下等价于一次成功的 iverilog 编译。
 - `q` 只表示退出 SDB，并不等价于测试通过；批处理回归应以 `HIT GOOD TRAP` 和退出状态 `0` 为准。

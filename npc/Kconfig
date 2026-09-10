@@ -43,6 +43,35 @@ config NPC_SIM_IVERILOG
 
 endchoice
 
+config NPC_NETLIST
+	bool "Simulate the ECC gate-level netlist (Verilator)"
+	depends on NPC_PLATFORM_DIRECT && !NPC_SIM_IVERILOG
+	default n
+	help
+	  Replace the Chisel-generated NPC RTL with the gate-level netlist that
+	  ECC produced with yosys. The netlist, the ICsprout55 standard cell
+	  behavioral models and NpcTop.sv (which provides the DPI-C memory) are
+	  compiled together with Verilator. This checks that the synthesized
+	  circuit behaves like the RTL, in particular that the RTL does not
+	  contain code that synthesizes differently.
+
+config NPC_NETLIST_FILE
+	string "Gate-level netlist (*_Synthesis_sim.v.gz)"
+	depends on NPC_NETLIST
+	default "../ecc/npc/runs/netlist-sim/Synthesis_yosys/output/npc_Synthesis_sim.v.gz"
+	help
+	  The simulation-oriented netlist produced by ECC. Its top module keeps
+	  the same ports as the RTL NPC module. The file is gunzipped into the
+	  build directory before Verilator runs.
+
+config NPC_PDK_ROOT
+	string "ICsprout55 PDK root"
+	depends on NPC_NETLIST
+	default "../icsprout55-pdk"
+	help
+	  Directory that contains IP/STD_cell/.... The standard cell
+	  behavioral simulation models are read from there.
+
 if NPC_PLATFORM_YSYXSOC
 
 choice

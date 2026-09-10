@@ -64,6 +64,12 @@ RESET_PC := 0x80000000
 PLATFORM_CFLAGS := -DNPC_RESET_PC=0x80000000u
 endif
 
+# Keep the gate-level build in its own Verilator directory so it never reuses
+# object files generated from the RTL.
+ifeq ($(CONFIG_NPC_NETLIST),y)
+OBJ_DIR := $(OBJ_DIR)-netlist
+endif
+
 ifeq ($(CONFIG_NPC_SIM_IVERILOG),y)
 SIMULATOR := iverilog
 else
@@ -91,6 +97,32 @@ ifeq ($(SIMULATOR),iverilog)
 SIM := $(IVL_SIM)
 else
 SIM := $(VERILATOR_SIM)
+endif
+
+# Gate-level netlist simulation.  When CONFIG_NPC_NETLIST is enabled the
+# Chisel-generated RTL is replaced by the netlist ECC produced, and the
+# ICsprout55 standard cell behavioral models are added to the Verilator build.
+ifeq ($(CONFIG_NPC_NETLIST),y)
+NETLIST_ENABLED := y
+else
+NETLIST_ENABLED := n
+endif
+PDK_ROOT ?= $(abspath $(patsubst "%",%,$(CONFIG_NPC_PDK_ROOT)))
+STD_CELL_DIR := $(PDK_ROOT)/IP/STD_cell/ics55_LLSC_H7C_V1p10C100
+STD_CELL_SRCS := $(STD_CELL_DIR)/ics55_LLSC_H7CH/verilog/ics55_LLSC_H7CH.v \
+	$(STD_CELL_DIR)/ics55_LLSC_H7CR/verilog/ics55_LLSC_H7CR.v \
+	$(STD_CELL_DIR)/ics55_LLSC_H7CL/verilog/ics55_LLSC_H7CL.v
+NETLIST_DIR := $(BUILD_DIR)/netlist
+NETLIST_GZ := $(patsubst "%",%,$(CONFIG_NPC_NETLIST_FILE))
+NETLIST_V := $(NETLIST_DIR)/npc_Synthesis_sim.v
+
+ifeq ($(NETLIST_ENABLED),y)
+ifeq ($(SIMULATOR),iverilog)
+$(error Gate-level netlist simulation needs Verilator; select it in menuconfig)
+endif
+ifeq ($(PLATFORM),ysyxsoc)
+$(error Gate-level netlist simulation only supports the Direct NPC platform)
+endif
 endif
 
 ifneq ($(origin DIFF),undefined)
@@ -122,6 +154,7 @@ endif
 endif
 
 CONFIG_ONLY_GOALS := menuconfig default_defconfig iverilog_defconfig \
+	netlist_defconfig \
 	ysyxsoc_defconfig \
 	ysyxsoc_mrom_defconfig ysyxsoc_flash_defconfig \
 	ysyxsoc_flash_32_defconfig ysyxsoc_flash_64_defconfig \
@@ -176,6 +209,21 @@ RTL_TOP := $(RTL_DIR)/$(CHISEL_TOP).sv
 RTL_FILELIST := $(RTL_DIR)/filelist.f
 RTL_SV = $(addprefix $(RTL_DIR)/,$(shell sed -e '/^[[:space:]]*$$/d' -e '/^[[:space:]]*#/d' $(RTL_FILELIST) 2>/dev/null))
 DIRECT_VSRC := vsrc/NpcTop.sv
+
+# In netlist mode the single gate-level NPC module takes the place of all the
+# Chisel RTL modules, so the RTL file list must not be compiled as well.
+ifeq ($(NETLIST_ENABLED),y)
+RTL_SIM_SRCS := $(NETLIST_V) $(STD_CELL_SRCS)
+RTL_SIM_DEPS := $(NETLIST_V) $(STD_CELL_SRCS)
+# The standard cell models contain timing checks that only the functional
+# models avoid; --no-timing drops them and the timescale is pinned so the
+# netlist and the models agree.
+VERILATOR_NETLIST_FLAGS := --timescale "1ns/1ns" --no-timing -D__VERILATOR__ -Dfunctional
+else
+RTL_SIM_SRCS := $(RTL_SV)
+RTL_SIM_DEPS := $(RTL_FILELIST)
+VERILATOR_NETLIST_FLAGS :=
+endif
 
 # Sources compiled into the VPI module that implements $pmem_read/$pmem_write.
 VPI_MODULE_SRCS := $(VPI_SRCS) csrc/common.c csrc/memory.c
@@ -293,6 +341,15 @@ $(C_OBJ_DIR):
 $(IVL_DIR):
 	@mkdir -p $@
 
+$(NETLIST_DIR):
+	@mkdir -p $@
+
+# ECC stores the simulation netlist gzipped, but Verilator cannot read a
+# compressed file, so it is expanded into the build directory first.
+$(NETLIST_V): $(NETLIST_GZ) | $(NETLIST_DIR)
+	@gunzip -c $< > $@
+	@test -s $@
+
 $(C_OBJ_DIR)/%.o: csrc/%.c $(C_HEADERS) $(CONFIG_HEADER) | $(C_OBJ_DIR)
 	@mkdir -p $(dir $@)
 	@$(CC) $(CFLAGS) $(CAPSTONE_CFLAGS) -I$(abspath include) -I$(abspath csrc/include) \
@@ -352,19 +409,19 @@ $(IVL_SIM): Makefile $(RTL_FILELIST) $(VSRC) $(CONFIG_HEADER) $(VPI_MODULE) | $(
 
 else
 
-$(SIM): Makefile $(RTL_FILELIST) $(VSRC) $(CXX_SRCS) $(C_OBJS) $(C_HEADERS) \
+$(SIM): Makefile $(RTL_SIM_DEPS) $(VSRC) $(CXX_SRCS) $(C_OBJS) $(C_HEADERS) \
 	$(CONFIG_HEADER) $(SIM_EXTRA_DEPS) | $(OBJ_DIR)
-	@$(foreach source,$(RTL_SV) $(VSRC),printf '+V %s\n' '$(notdir $(source))';)
+	@$(foreach source,$(RTL_SIM_SRCS) $(VSRC),printf '+V %s\n' '$(notdir $(source))';)
 	@$(foreach source,$(C_SRCS),printf '+C %s\n' '$(notdir $(source))';)
 	@$(foreach source,$(CXX_SRCS),printf '+CC %s\n' '$(notdir $(source))';)
 	@# C objects are linker inputs, not prerequisites in Verilator's generated Makefile.
 	@rm -f $(SIM)
 	@$(VERILATOR) --cc --exe --build --trace --autoflush --Wno-fatal \
-		$(VERILATOR_PLATFORM_FLAGS) \
+		$(VERILATOR_PLATFORM_FLAGS) $(VERILATOR_NETLIST_FLAGS) \
 		--top-module $(TOP_MODULE) --Mdir $(OBJ_DIR) \
 		-CFLAGS "$(CXXFLAGS) $(CAPSTONE_CFLAGS) $(NVBOARD_HOST_CFLAGS) -I$(abspath include) -I$(abspath csrc/include) -DNPC_CONFIG_ROOT=\\\"$(abspath .)\\\" $(PLATFORM_CFLAGS)" \
 		-LDFLAGS "$(abspath $(C_OBJS)) $(CAPSTONE_LIBS) -ldl $(NVBOARD_HOST_LDFLAGS)" \
-		$(RTL_SV) $(VSRC) $(CXX_SRCS) >$(VERILATOR_LOG) 2>&1 || { cat $(VERILATOR_LOG); exit 1; }
+		$(RTL_SIM_SRCS) $(VSRC) $(CXX_SRCS) >$(VERILATOR_LOG) 2>&1 || { cat $(VERILATOR_LOG); exit 1; }
 	@grep -E '^- V e r i l a t i o n +R e p o r t:|^- Verilator:' $(VERILATOR_LOG) || true
 	@rm -f $(VERILATOR_LOG)
 
@@ -404,6 +461,12 @@ ifeq ($(SIMULATOR),iverilog)
 # program is the closest equivalent.
 lint: $(IVL_SIM)
 	@echo "Icarus Verilog accepted the RTL, the testbench and the VPI module."
+else ifeq ($(NETLIST_ENABLED),y)
+lint: $(RTL_SIM_DEPS) $(VSRC)
+	$(VERILATOR) --lint-only -Wall --Wno-fatal \
+		$(VERILATOR_PLATFORM_FLAGS) $(VERILATOR_NETLIST_FLAGS) \
+		--top-module $(LINT_TOP) \
+		$(RTL_SIM_SRCS) $(VSRC)
 else
 lint: $(RTL_FILELIST)
 	$(VERILATOR) --lint-only -Wall --Wno-fatal \
@@ -416,6 +479,7 @@ help:
 	@echo '  menuconfig      - Update NPC debugging configuration'
 	@echo '  default_defconfig - Load the default NPC configuration'
 	@echo '  iverilog_defconfig - Select the direct NPC with the Icarus Verilog simulator'
+	@echo '  netlist_defconfig - Select the direct NPC with the ECC gate-level netlist'
 	@echo '  ysyxsoc_mrom_defconfig  - Select ysyxSoC with reset PC in MROM'
 	@echo '  ysyxsoc_flash_{32,64,128}_defconfig - Select flash XIP and SDRAM capacity'
 	@echo '  ysyxsoc_chiplink_defconfig - Select the MROM/128 MiB ChipLink SoC'
