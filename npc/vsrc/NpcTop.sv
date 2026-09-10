@@ -2,6 +2,12 @@ module NpcTop (
   input logic clock,
   input logic reset
 );
+`ifdef __ICARUS__
+  // Icarus Verilog does not support DPI-C.  Its simulation environment
+  // supplies the physical memory through the VPI system function
+  // $pmem_read and the VPI system task $pmem_write, and it does not run
+  // DiffTest, so npc_commit is intentionally absent here.
+`else
 `ifndef SYNTHESIS
   import "DPI-C" function int pmem_read(input int raddr);
   import "DPI-C" function void pmem_write(
@@ -17,6 +23,7 @@ module NpcTop (
     input int mem_data, input int mem_mask, input int halt,
     input int halt_code, input int invalid
   );
+`endif
 `endif
 
   logic [31:0] io_imem_addr;
@@ -159,10 +166,14 @@ module NpcTop (
         end else if (io_master_araddr == 32'h20000004) begin
           read_data_reg <= mtime[63:32];
         end else begin
+`ifdef __ICARUS__
+          read_data_reg <= $pmem_read(io_master_araddr);
+`else
 `ifndef SYNTHESIS
           read_data_reg <= pmem_read(io_master_araddr);
 `else
           read_data_reg <= 32'b0;
+`endif
 `endif
         end
       end
@@ -190,12 +201,20 @@ module NpcTop (
 `endif
         end else if ((write_addr_valid ? write_addr_reg : io_master_awaddr) != 32'h20000000 &&
                      (write_addr_valid ? write_addr_reg : io_master_awaddr) != 32'h20000004) begin
+`ifdef __ICARUS__
+          $pmem_write(
+            (write_addr_valid ? write_addr_reg : io_master_awaddr),
+            (write_data_valid ? write_data_reg : io_master_wdata),
+            (write_data_valid ? write_strb_reg : io_master_wstrb)
+          );
+`else
 `ifndef SYNTHESIS
           pmem_write(
             (write_addr_valid ? write_addr_reg : io_master_awaddr),
             (write_data_valid ? write_data_reg : io_master_wdata),
             (write_data_valid ? write_strb_reg : io_master_wstrb)
           );
+`endif
 `endif
         end
         write_addr_valid <= 1'b0;
@@ -209,6 +228,18 @@ module NpcTop (
 
   always_ff @(posedge clock) begin
     if (!reset && io_retire_valid) begin
+`ifdef __ICARUS__
+      if (io_halt) begin
+        if (io_invalid || io_halt_code != 32'd0) begin
+          $display("HIT BAD TRAP at pc=0x%08x, inst=0x%08x, code=%0d",
+                   io_retire_pc, io_retire_inst, io_halt_code);
+          $fatal(1, "NPC stopped on a bad trap");
+        end else begin
+          $display("HIT GOOD TRAP at pc=0x%08x", io_retire_pc);
+          $finish;
+        end
+      end
+`else
 `ifndef SYNTHESIS
       npc_commit(
         io_retire_pc, io_retire_inst, io_retire_dnpc,
@@ -220,6 +251,7 @@ module NpcTop (
         io_mem_trace_data, int'(io_mem_trace_mask), int'(io_halt), io_halt_code,
         int'(io_invalid)
       );
+`endif
 `endif
     end
   end

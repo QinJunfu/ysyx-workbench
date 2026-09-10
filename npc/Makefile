@@ -5,6 +5,9 @@ YSYXSOC_HOME ?= $(abspath ../ysyxSoC)
 NVBOARD_HOME ?= $(abspath ../nvboard)
 MILL ?= /usr/bin/mill
 VERILATOR ?= verilator
+IVERILOG ?= iverilog
+VVP ?= vvp
+IVERILOG_VPI ?= iverilog-vpi
 CXX ?= c++
 CXXFLAGS ?= -std=c++20 -O2 -Wall -Wextra
 
@@ -61,8 +64,34 @@ RESET_PC := 0x80000000
 PLATFORM_CFLAGS := -DNPC_RESET_PC=0x80000000u
 endif
 
-SIM := $(OBJ_DIR)/V$(TOP_MODULE)
+ifeq ($(CONFIG_NPC_SIM_IVERILOG),y)
+SIMULATOR := iverilog
+else
+SIMULATOR := verilator
+endif
+
+ifeq ($(PLATFORM),ysyxsoc)
+ifeq ($(SIMULATOR),iverilog)
+$(error Icarus Verilog only supports the Direct NPC platform; select Direct NPC in menuconfig)
+endif
+endif
+
+VERILATOR_SIM := $(OBJ_DIR)/V$(TOP_MODULE)
 VERILATOR_LOG := $(OBJ_DIR)/.verilator.log
+
+# Icarus Verilog outputs a compiled .vvp program plus a VPI module that
+# provides the physical memory.
+IVL_DIR := $(BUILD_DIR)/iverilog
+IVL_TOP := iverilog_top
+IVL_SIM := $(IVL_DIR)/$(IVL_TOP).vvp
+VPI_NAME := npc_vpi
+VPI_MODULE := $(IVL_DIR)/$(VPI_NAME).vpi
+
+ifeq ($(SIMULATOR),iverilog)
+SIM := $(IVL_SIM)
+else
+SIM := $(VERILATOR_SIM)
+endif
 
 ifneq ($(origin DIFF),undefined)
 $(error DIFF=... is no longer supported; enable CONFIG_NPC_DIFFTEST with 'make menuconfig')
@@ -92,7 +121,8 @@ $(error NPC configuration is missing; run 'make menuconfig' or 'make default_def
 endif
 endif
 
-CONFIG_ONLY_GOALS := menuconfig default_defconfig ysyxsoc_defconfig \
+CONFIG_ONLY_GOALS := menuconfig default_defconfig iverilog_defconfig \
+	ysyxsoc_defconfig \
 	ysyxsoc_mrom_defconfig ysyxsoc_flash_defconfig \
 	ysyxsoc_flash_32_defconfig ysyxsoc_flash_64_defconfig \
 	ysyxsoc_flash_128_defconfig ysyxsoc_chiplink_defconfig \
@@ -133,7 +163,11 @@ endif
 endif
 
 SCALA_SRCS := $(sort $(shell find src -type f -name '*.scala'))
-C_SRCS := $(sort $(shell find csrc -type f -name '*.c'))
+VPI_SRCS := csrc/vpi.c
+ALL_C_SRCS := $(sort $(shell find csrc -type f -name '*.c'))
+# csrc/vpi.c only makes sense inside the Icarus Verilog VPI module, so it is
+# kept out of the object list that is linked into the Verilator executable.
+C_SRCS := $(filter-out $(VPI_SRCS),$(ALL_C_SRCS))
 CXX_SRCS := $(sort $(shell find csrc -type f \( -name '*.cc' -o -name '*.cpp' \)))
 C_HEADERS := $(sort $(shell find csrc -type f -name '*.h'))
 C_OBJS := $(patsubst csrc/%.c,$(C_OBJ_DIR)/%.o,$(C_SRCS))
@@ -142,6 +176,10 @@ RTL_TOP := $(RTL_DIR)/$(CHISEL_TOP).sv
 RTL_FILELIST := $(RTL_DIR)/filelist.f
 RTL_SV = $(addprefix $(RTL_DIR)/,$(shell sed -e '/^[[:space:]]*$$/d' -e '/^[[:space:]]*#/d' $(RTL_FILELIST) 2>/dev/null))
 DIRECT_VSRC := vsrc/NpcTop.sv
+
+# Sources compiled into the VPI module that implements $pmem_read/$pmem_write.
+VPI_MODULE_SRCS := $(VPI_SRCS) csrc/common.c csrc/memory.c
+VPI_INCLUDES := -I$(abspath csrc/include)
 
 ifeq ($(PLATFORM),ysyxsoc)
 YSYXSOC_SCALA_SRCS := $(sort $(shell find $(YSYXSOC_HOME)/src -type f -name '*.scala'))
@@ -162,7 +200,11 @@ SIM_EXTRA_DEPS := $(NVBOARD_ARCHIVE)
 NVBOARD_HOST_CFLAGS := -I$(NVBOARD_HOME)/usr/include
 NVBOARD_HOST_LDFLAGS := $(NVBOARD_ARCHIVE) $(LDFLAGS)
 else
+ifeq ($(SIMULATOR),iverilog)
+VSRC := $(DIRECT_VSRC) vsrc/IverilogTop.sv
+else
 VSRC := $(DIRECT_VSRC)
+endif
 VERILATOR_PLATFORM_FLAGS :=
 SIM_EXTRA_DEPS :=
 NVBOARD_HOST_CFLAGS :=
@@ -215,6 +257,23 @@ ifneq ($(strip $(WAVEFORM)),)
 RUN_ARGS += --waveform "$(WAVEFORM)"
 endif
 
+# Icarus Verilog receives the image and the cycle limit as plusargs. The VPI
+# module consumes +image= before the simulation starts, and iverilog_top
+# consumes +max-cycles= and +wave=.
+IVL_RUN_ARGS = +image="$(EFFECTIVE_IMAGE)" +max-cycles=$(MAX_CYCLES)
+ifneq ($(strip $(WAVEFORM)),)
+IVL_RUN_ARGS += +wave="$(WAVEFORM)"
+endif
+
+ifeq ($(SIMULATOR),iverilog)
+# iverilog records the absolute VPI module path inside the .vvp file, so vvp
+# loads npc_vpi on its own; passing -m here as well would register the system
+# tasks and the start-of-simulation callback twice.
+SIM_COMMAND = $(VVP) $(IVL_SIM) $(IVL_RUN_ARGS)
+else
+SIM_COMMAND = $(SIM) $(RUN_ARGS)
+endif
+
 .DEFAULT_GOAL := all
 
 all: sim
@@ -229,6 +288,9 @@ $(OBJ_DIR):
 	@mkdir -p $@
 
 $(C_OBJ_DIR):
+	@mkdir -p $@
+
+$(IVL_DIR):
 	@mkdir -p $@
 
 $(C_OBJ_DIR)/%.o: csrc/%.c $(C_HEADERS) $(CONFIG_HEADER) | $(C_OBJ_DIR)
@@ -268,6 +330,28 @@ $(NVBOARD_AUTO_BIND): $(NVBOARD_NXDC)
 	@NVBOARD_HOME=$(NVBOARD_HOME) python3 $(NVBOARD_HOME)/scripts/auto_pin_bind.py $< $@
 endif
 
+ifeq ($(SIMULATOR),iverilog)
+
+# The VPI module is built first: iverilog loads it while compiling so that the
+# compiler learns that $pmem_read is a 32-bit system function and $pmem_write
+# is a system task. Without this, iverilog would treat $pmem_read as a task and
+# reject calls that use its return value.
+$(VPI_MODULE): $(VPI_MODULE_SRCS) $(C_HEADERS) | $(IVL_DIR)
+	@cd $(IVL_DIR) && $(IVERILOG_VPI) --name=$(VPI_NAME) \
+		$(VPI_INCLUDES) \
+		$(abspath csrc/vpi.c) $(abspath csrc/common.c) $(abspath csrc/memory.c)
+
+$(IVL_SIM): Makefile $(RTL_FILELIST) $(VSRC) $(CONFIG_HEADER) $(VPI_MODULE) | $(IVL_DIR)
+	@$(foreach source,$(RTL_SV) $(VSRC),printf '+V %s\n' '$(notdir $(source))';)
+	@# -g2012 enables the SystemVerilog features firtool emits.
+	@# The lecture notes call out that the "sorry: constant selects ..."
+	@# diagnostics iverilog may print here are harmless and can be ignored.
+	@$(IVERILOG) -g2012 -s $(IVL_TOP) \
+		-L$(abspath $(IVL_DIR)) -m$(VPI_NAME) \
+		-o $@ $(RTL_SV) $(VSRC)
+
+else
+
 $(SIM): Makefile $(RTL_FILELIST) $(VSRC) $(CXX_SRCS) $(C_OBJS) $(C_HEADERS) \
 	$(CONFIG_HEADER) $(SIM_EXTRA_DEPS) | $(OBJ_DIR)
 	@$(foreach source,$(RTL_SV) $(VSRC),printf '+V %s\n' '$(notdir $(source))';)
@@ -284,13 +368,15 @@ $(SIM): Makefile $(RTL_FILELIST) $(VSRC) $(CXX_SRCS) $(C_OBJS) $(C_HEADERS) \
 	@grep -E '^- V e r i l a t i o n +R e p o r t:|^- Verilator:' $(VERILATOR_LOG) || true
 	@rm -f $(VERILATOR_LOG)
 
+endif
+
 sim: $(SIM)
 	$(call git_commit, "sim RTL") # DO NOT REMOVE THIS LINE!!!
 
 run: sim
 	@test -n "$(EFFECTIVE_IMAGE)" || { echo "IMAGE, MROM_IMAGE, or FLASH_IMAGE is required" >&2; exit 2; }
 	@if [ -n "$(strip $(WAVEFORM))" ]; then mkdir -p "$(dir $(WAVEFORM))"; fi
-	$(SIM) $(RUN_ARGS)
+	$(SIM_COMMAND)
 
 batch: BATCH = 1
 batch: run
@@ -313,15 +399,23 @@ else
 LINT_TOP := NpcTop
 endif
 
+ifeq ($(SIMULATOR),iverilog)
+# iverilog has no separate lint mode; a successful elaboration of the .vvp
+# program is the closest equivalent.
+lint: $(IVL_SIM)
+	@echo "Icarus Verilog accepted the RTL, the testbench and the VPI module."
+else
 lint: $(RTL_FILELIST)
 	$(VERILATOR) --lint-only -Wall --Wno-fatal \
 		--top-module $(LINT_TOP) \
 		-I$(abspath $(RTL_DIR)) \
 		-f $(RTL_FILELIST)
+endif
 
 help:
 	@echo '  menuconfig      - Update NPC debugging configuration'
 	@echo '  default_defconfig - Load the default NPC configuration'
+	@echo '  iverilog_defconfig - Select the direct NPC with the Icarus Verilog simulator'
 	@echo '  ysyxsoc_mrom_defconfig  - Select ysyxSoC with reset PC in MROM'
 	@echo '  ysyxsoc_flash_{32,64,128}_defconfig - Select flash XIP and SDRAM capacity'
 	@echo '  ysyxsoc_chiplink_defconfig - Select the MROM/128 MiB ChipLink SoC'

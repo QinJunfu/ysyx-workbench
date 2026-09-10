@@ -1,6 +1,6 @@
 # NPC 使用说明
 
-这是一个基于 Chisel 和 Verilator 的 RV32E NPC。它从 `0x80000000` 复位，加载裸机二进制镜像，并提供批处理运行、SDB 调试、DiffTest、指令/内存/函数追踪和 VCD 波形。
+这是一个基于 Chisel 的 RV32E NPC。它从 `0x80000000` 复位，加载裸机二进制镜像，并提供批处理运行、SDB 调试、DiffTest、指令/内存/函数追踪和 VCD 波形。RTL 可以用 Verilator（二值，DPI-C 驱动，支持 DiffTest 和 SDB）或 Icarus Verilog（四值，VPI 访存，用于检查 X 信号传播）进行仿真，两者通过 `menuconfig` 切换。
 
 本文中的命令均假定当前目录是工作区根目录：
 
@@ -19,17 +19,22 @@ ROOT=$PWD
 
 ## 配置
 
-NPC 的 DiffTest 和文本 trace 使用独立的 Kconfig 配置，不会修改 NEMU 的 `.config`：
+NPC 的平台、仿真器、DiffTest 和文本 trace 使用独立的 Kconfig 配置，不会修改 NEMU 的 `.config`：
 
 ```bash
-make -C npc default_defconfig   # 使用默认配置（全部关闭）
-make -C npc menuconfig          # 交互式启用配置项
+make -C npc default_defconfig    # Direct NPC + Verilator（全部调试功能默认关闭）
+make -C npc iverilog_defconfig   # Direct NPC + Icarus Verilog 四值仿真
+make -C npc ysyxsoc_mrom_defconfig   # ysyxSoC 平台（只支持 Verilator）
+make -C npc menuconfig           # 交互式启用配置项
 ```
 
-可配置项为 `CONFIG_NPC_DIFFTEST`、`CONFIG_NPC_DIFFTEST_REF_PATH`、
-`CONFIG_NPC_ITRACE`、`CONFIG_NPC_MTRACE` 和 `CONFIG_NPC_FTRACE`。配置文件保存在
-`npc/.config`，生成的头文件保存在 `npc/include/generated/autoconf.h`。首次执行
-`make`、`make sim` 或 `make run` 前必须先运行上面的任一配置命令。
+`menuconfig` 中先选择 `Simulation platform`，再在 `RTL simulator` 中选择
+`Verilator (DPI-C, two-value)` 或 `Icarus Verilog (VPI, four-value)`。Icarus Verilog
+只支持 Direct NPC 平台，因此该选项只在 Direct NPC 下可见。其余可配置项为
+`CONFIG_NPC_DIFFTEST`、`CONFIG_NPC_DIFFTEST_REF_PATH`、`CONFIG_NPC_ITRACE`、
+`CONFIG_NPC_MTRACE` 和 `CONFIG_NPC_FTRACE`。配置文件保存在 `npc/.config`，生成的头文件
+保存在 `npc/include/generated/autoconf.h`。首次执行 `make`、`make sim` 或 `make run`
+前必须先运行上面的任一配置命令。
 
 ## cpu-test测试
 
@@ -88,6 +93,61 @@ make -C npc run \
 
 批处理和 SDB 的 `c` 均不设仿真周期上限，会持续运行直到 trap、watchpoint、错误或 Verilator 结束仿真。`si [N]` 仍只执行用户显式指定的 `N` 个时钟周期。
 
+## Icarus Verilog 四值仿真（检查 X 信号传播）
+
+Verilator 是二值仿真器，未复位的触发器会得到 0 或 1 而不是不定态，因此无法发现“需要复位
+但没有复位”的触发器。Icarus Verilog 是四值仿真器，未复位触发器的初值为 `X`；如果这样的
+触发器存在，`X` 会沿数据通路传播并可能让程序运行失败。本仓库通过 `make menuconfig` 同时
+支持两种仿真器：
+
+- iverilog 编译时会自动定义宏 `__ICARUS__`。`vsrc/NpcTop.sv` 用 `__ICARUS__` 把对
+  DPI-C 函数 `pmem_read()`/`pmem_write()` 和 `npc_commit()` 的调用替换为 VPI 系统
+  任务/函数 `$pmem_read`/`$pmem_write`，并去掉 DPI-C 的 `import`；iverilog 环境下不实现
+  DiffTest。
+- `csrc/vpi.c` 被编译为 VPI 模块 `build/iverilog/npc_vpi.vpi`，注册 32 位系统函数
+  `$pmem_read` 和系统任务 `$pmem_write`，并在仿真开始前（`cbStartOfSimulation`）把
+  `+image=PATH` 指定的程序加载进 `csrc/memory.c` 的内存数组，因此复用了 Verilator 流程
+  的物理内存实现。
+- `vsrc/IverilogTop.sv` 是自驱动的仿真顶层：它产生时钟和复位、可选地 dump VCD，并在
+  `NpcTop` 识别到 `ebreak` 时输出 `HIT GOOD/BAD TRAP` 后结束仿真。没有 DPI-C 时 C 宿主
+  不再参与，仿真由 iverilog 自己驱动。
+
+使用方式：
+
+```bash
+make -C npc iverilog_defconfig
+make -C npc run \
+  IMAGE="$ROOT/am-kernels/tests/cpu-tests/build/dummy-riscv32e-npc.bin" BATCH=1
+```
+
+`EFFECTIVE_IMAGE` 会作为 `+image=` 传给 VPI 模块；`MAX_CYCLES=<N>` 会作为
+`+max-cycles=` 传给仿真顶层，超过上限会以 `NPC TIMEOUT` 结束（`MAX_CYCLES=0` 表示不限制）。
+`WAVEFORM=<vcd>` 会作为 `+wave=` 传给仿真顶层并生成波形：
+
+```bash
+make -C npc run \
+  IMAGE="$ROOT/am-kernels/tests/cpu-tests/build/dummy-riscv32e-npc.bin" \
+  MAX_CYCLES=200000 WAVEFORM=build/waveform.vcd BATCH=1
+gtkwave npc/build/waveform.vcd
+```
+
+运行 AM 回归与 `microbench`：
+
+```bash
+make -C am-kernels/tests/cpu-tests ARCH=riscv32e-npc batch
+make -C am-kernels/benchmarks/microbench ARCH=riscv32e-npc mainargs=test batch
+```
+
+在当前的 RTL 上，37 个 cpu-tests 中 36 个 `PASS`（`wrong` 是预期的 bad trap 负例），
+`microbench` 的 10 个基准全部 `Passed`。四值仿真的效果也可以用波形确认：仿真时刻 0 时
+所有未初始化寄存器都是 `X`，复位结束后电路不再出现 `X`，说明全部需要复位的触发器都已
+复位，无需修改 RTL。
+
+iverilog 编译时可能输出讲义中提到的
+`sorry: constant selects in always_* processes ...`，以及 `$display`/`$write` 等仿真系统
+任务在 `always_ff` 中的 `warning: ... cannot be synthesized`。这些都是仿真专用代码的正常
+提示，可以忽略；只看是否出现了 `error:` 以及命令的退出状态。
+
 ## DiffTest
 
 首次使用或 NEMU 参考端修改后，先构建参考共享库：
@@ -145,7 +205,12 @@ make -C npc run \
 - `CONFIG_NPC_ITRACE`：输出反汇编后的指令执行记录。
 - `CONFIG_NPC_MTRACE`：输出内存读写记录。
 - `CONFIG_NPC_FTRACE`：输出函数调用/返回记录，必须同时提供 `ELF=...`。
-- 通过本文的 `make -C npc run` 流程，仿真器初始化成功后会生成或覆盖 `npc/build/waveform.vcd`。该路径相对于 NPC 工作目录，直接运行可执行文件时会随当前目录变化。VCD 独立于文本 trace，可用查看器打开，例如：
+- 这些文本 trace 只在 Verilator 配置下可用。
+
+Verilator 配置下，仿真器初始化成功后会在 `CONFIG_NPC_WAVEFORM_FILE`（默认
+`npc/build/waveform.vcd`）生成或覆盖 VCD。该路径相对于 NPC 工作目录，直接运行可执行文件时
+会随当前目录变化。Icarus Verilog 配置下用 `WAVEFORM=<vcd>` 指定波形路径，见上一节。VCD
+独立于文本 trace，可用查看器打开，例如：
 
   ```bash
   gtkwave npc/build/waveform.vcd
@@ -167,4 +232,6 @@ AM 的 `npc.mk` 会自动生成 `.bin` 和 `.elf`，并将它们传给 `npc/Make
 - 首次执行时 Mill 需要下载尚未缓存的依赖；若出现 `repo1.maven.org` 的 DNS 或下载错误，应先检查网络和本地依赖缓存。
 - `CONFIG_NPC_FTRACE requires --elf` 表示启用了函数 trace 但没有设置 `ELF`。
 - `--diff`、`--itrace`、`--mtrace`、`--ftrace` 和 `--trace` 是已删除的旧参数，请使用 `make menuconfig`。
+- Icarus Verilog 配置下没有 SDB、DiffTest 和文本 trace：`BATCH`、`ELF` 只对 Verilator 有效，`HIT GOOD TRAP`/`HIT BAD TRAP` 由 `vsrc/NpcTop.sv` 在 `ebreak` 时直接打印，退出状态分别为 `0`/`1`。
+- `make -C npc lint` 在 Verilator 配置下运行 `verilator --lint-only`，在 Icarus Verilog 配置下等价于一次成功的 iverilog 编译。
 - `q` 只表示退出 SDB，并不等价于测试通过；批处理回归应以 `HIT GOOD TRAP` 和退出状态 `0` 为准。

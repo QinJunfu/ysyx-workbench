@@ -16,6 +16,33 @@ config NPC_PLATFORM_YSYXSOC
 
 endchoice
 
+choice
+	prompt "RTL simulator"
+	default NPC_SIM_VERILATOR
+	help
+	  Select how the generated RTL is simulated. Verilator is a fast
+	  two-value simulator driven by DPI-C, while Icarus Verilog is a
+	  four-value simulator that can expose X propagation from registers
+	  which are missing a reset.
+
+config NPC_SIM_VERILATOR
+	bool "Verilator (DPI-C, two-value)"
+	help
+	  Build the NPC RTL with Verilator and drive it from the C host through
+	  DPI-C. This is the default and supports DiffTest and the SDB.
+
+config NPC_SIM_IVERILOG
+	bool "Icarus Verilog (VPI, four-value)"
+	depends on NPC_PLATFORM_DIRECT
+	help
+	  Build the direct NPC RTL with Icarus Verilog and provide the physical
+	  memory through a VPI module ($pmem_read/$pmem_write). Icarus Verilog
+	  emulates X values so this configuration can be used to find registers
+	  which need a reset but do not have one. Only the Direct NPC platform
+	  is supported, and DiffTest is not available.
+
+endchoice
+
 if NPC_PLATFORM_YSYXSOC
 
 choice

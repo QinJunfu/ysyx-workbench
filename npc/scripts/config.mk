@@ -28,6 +28,10 @@ default_defconfig: $(CONF) $(FIXDEP)
 	$(CONF) -s --defconfig=configs/default_defconfig $(KCONFIG)
 	$(CONF) -s --syncconfig $(KCONFIG)
 
+iverilog_defconfig: $(CONF) $(FIXDEP)
+	$(CONF) -s --defconfig=configs/iverilog_defconfig $(KCONFIG)
+	$(CONF) -s --syncconfig $(KCONFIG)
+
 ysyxsoc_defconfig: $(CONF) $(FIXDEP)
 	$(CONF) -s --defconfig=configs/ysyxsoc_defconfig $(KCONFIG)
 	$(CONF) -s --syncconfig $(KCONFIG)
@@ -72,8 +76,9 @@ config-clean:
 
 distclean: clean config-clean
 
-.PHONY: menuconfig default_defconfig ysyxsoc_defconfig ysyxsoc_mrom_defconfig \
-	ysyxsoc_flash_defconfig ysyxsoc_flash_32_defconfig \
-	ysyxsoc_flash_64_defconfig ysyxsoc_flash_128_defconfig \
-	ysyxsoc_chiplink_defconfig ysyxsoc_mrom_difftest_defconfig \
-	ysyxsoc_flash_difftest_defconfig savedefconfig config-clean distclean
+.PHONY: menuconfig default_defconfig iverilog_defconfig ysyxsoc_defconfig \
+	ysyxsoc_mrom_defconfig ysyxsoc_flash_defconfig \
+	ysyxsoc_flash_32_defconfig ysyxsoc_flash_64_defconfig \
+	ysyxsoc_flash_128_defconfig ysyxsoc_chiplink_defconfig \
+	ysyxsoc_mrom_difftest_defconfig ysyxsoc_flash_difftest_defconfig \
+	savedefconfig config-clean distclean
