@@ -307,6 +307,18 @@ ysyxSoC-run: check-ysyxsoc-config
 ysyxSoC-batch: check-ysyxsoc-config
 	@$(MAKE) run BATCH=1 NVBOARD=0 YSYX_SOC=1
 
+ifeq ($(PLATFORM),ysyxsoc)
+LINT_TOP := NPC
+else
+LINT_TOP := NpcTop
+endif
+
+lint: $(RTL_FILELIST)
+	$(VERILATOR) --lint-only -Wall --Wno-fatal \
+		--top-module $(LINT_TOP) \
+		-I$(abspath $(RTL_DIR)) \
+		-f $(RTL_FILELIST)
+
 help:
 	@echo '  menuconfig      - Update NPC debugging configuration'
 	@echo '  default_defconfig - Load the default NPC configuration'
@@ -339,7 +351,7 @@ idea:
 clean:
 	-rm -rf $(BUILD_DIR)
 
-.PHONY: all ref verilog sim run batch check-ysyxsoc-config ysyxSoC-run ysyxSoC-batch \
+.PHONY: all ref verilog sim run batch lint check-ysyxsoc-config ysyxSoC-run ysyxSoC-batch \
 	help reformat checkformat bsp idea clean
 
 -include $(C_DEPS)
