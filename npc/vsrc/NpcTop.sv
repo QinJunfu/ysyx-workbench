@@ -105,7 +105,8 @@ module NpcTop (
   logic io_slave_rlast;
   logic [3:0] io_slave_rid;
 
-  NPC core (
+  // The CPU top module has the same name on every platform.
+  ysyx_24100022 core (
     .clock(clock), .reset(reset),
     .io_interrupt(io_interrupt),
     .io_master_awvalid(io_master_awvalid), .io_master_awready(io_master_awready),

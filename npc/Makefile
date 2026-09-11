@@ -14,10 +14,15 @@ CXXFLAGS ?= -std=c++20 -O2 -Wall -Wextra
 include scripts/config.mk
 -include $(CONFIG_FILE)
 
+# The emitted CPU top module is ysyx_24100022 on every platform; it is also the
+# Chisel class name, so the generated RTL file keeps that name. Only the reset
+# vector, the address-space personality and the simulation wrapper differ
+# between the Direct NPC and ysyxSoC platforms.
+CHISEL_TOP := ysyx_24100022
+
 ifeq ($(CONFIG_NPC_PLATFORM_YSYXSOC),y)
 PLATFORM := ysyxsoc
 TOP_MODULE := ysyxSoCFull
-CHISEL_TOP := ysyx_24100022
 ifeq ($(CONFIG_NPC_YSYXSOC_BOOT_FLASH),y)
 YSYXSOC_BOOT_MEDIUM := flash
 RESET_PC := 0x30000000
@@ -50,13 +55,14 @@ YSYXSOC_NPC_VARIANT := $(YSYXSOC_BOOT_MEDIUM)-$(YSYXSOC_SOC_VARIANT)
 RTL_DIR := $(BUILD_DIR)/rtl-ysyxsoc-$(YSYXSOC_NPC_VARIANT)
 C_OBJ_DIR := $(BUILD_DIR)/cobj-ysyxsoc-$(YSYXSOC_NPC_VARIANT)
 OBJ_DIR := $(BUILD_DIR)/obj_dir-ysyxsoc-$(YSYXSOC_NPC_VARIANT)
-ELABORATE_ARGS := --soc --reset-pc $(RESET_PC)
+ELABORATE_ARGS := --soc --narrow-addresses --reset-pc $(RESET_PC)
 PLATFORM_CFLAGS := -DNPC_RESET_PC=$(RESET_PC)u
 else
 PLATFORM := direct
+# The Direct RTL is the CPU itself; NpcTop.sv is only the simulation wrapper
+# around it, so the Verilator top stays the wrapper.
 TOP_MODULE := NpcTop
-CHISEL_TOP := NPC
-ELABORATE_ARGS :=
+ELABORATE_ARGS := --reset-pc 0x80000000
 RTL_DIR := $(BUILD_DIR)/rtl
 C_OBJ_DIR := $(BUILD_DIR)/cobj
 OBJ_DIR := $(BUILD_DIR)/obj_dir
@@ -207,16 +213,19 @@ RTL_FILELIST := $(RTL_DIR)/filelist.f
 RTL_SV = $(addprefix $(RTL_DIR)/,$(shell sed -e '/^[[:space:]]*$$/d' -e '/^[[:space:]]*#/d' $(RTL_FILELIST) 2>/dev/null))
 DIRECT_VSRC := vsrc/NpcTop.sv
 
-# In netlist mode the single gate-level NPC module takes the place of all the
+# In netlist mode the single gate-level CPU module takes the place of all the
 # Chisel RTL modules, so the RTL file list must not be compiled as well.
 ifeq ($(NETLIST_ENABLED),y)
 RTL_SIM_SRCS = $(NETLIST_V) $(STD_CELL_SRCS)
 RTL_SIM_DEPS = $(NETLIST_V) $(STD_CELL_SRCS)
 # The standard cell models contain timing checks that only the functional
 # models avoid; --no-timing drops them and the timescale is pinned so the
-# netlist and the models agree. The netlist top is the strict NPC module; the
-# simulation-only NpcCommitDpi tap is not synthesizable, so it is absent here
-# and the netlist carries no DPI-C, VPI or black box at all.
+# netlist and the models agree. The netlist top must carry the same module name
+# as the Chisel top, $(CHISEL_TOP), so a netlist synthesized before the top was
+# renamed no longer matches NpcTop.sv and has to be resynthesized with
+# `make -C ../ecc/npc netlist`; the simulation-only NpcCommitDpi tap is not
+# synthesizable, so it is absent here and the netlist carries no DPI-C, VPI or
+# black box at all.
 VERILATOR_NETLIST_FLAGS := --timescale "1ns/1ns" --no-timing -D__VERILATOR__ -Dfunctional
 # iverilog has no --no-timing, but the specify blocks are compiled away by the
 # functional define.  __ICARUS__ is defined automatically by iverilog.
@@ -365,6 +374,9 @@ $(RTL_TOP): $(SCALA_SRCS) build.mill .mill-version $(CONFIG_FILE) | $(RTL_DIR)
 	$(MILL) -i runMain Elaborate $(ELABORATE_ARGS) --target-dir $(RTL_DIR)
 	@test -f $@
 	@test -f $(RTL_FILELIST)
+	@# The top module is ysyx_24100022 now, so a previously generated NPC.sv in
+	@# the same directory would be a stale duplicate of the same design.
+	@rm -f $(RTL_DIR)/NPC.sv
 
 $(RTL_FILELIST): $(RTL_TOP)
 	@test -f $@
@@ -458,7 +470,7 @@ ysyxSoC-batch: check-ysyxsoc-config
 	@$(MAKE) run BATCH=1 NVBOARD=0 YSYX_SOC=1
 
 ifeq ($(PLATFORM),ysyxsoc)
-LINT_TOP := NPC
+LINT_TOP := $(CHISEL_TOP)
 else
 LINT_TOP := NpcTop
 endif
