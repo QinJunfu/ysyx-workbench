@@ -214,7 +214,9 @@ RTL_SIM_SRCS = $(NETLIST_V) $(STD_CELL_SRCS)
 RTL_SIM_DEPS = $(NETLIST_V) $(STD_CELL_SRCS)
 # The standard cell models contain timing checks that only the functional
 # models avoid; --no-timing drops them and the timescale is pinned so the
-# netlist and the models agree.
+# netlist and the models agree. The netlist top is the strict NPC module; the
+# simulation-only NpcCommitDpi tap is not synthesizable, so it is absent here
+# and the netlist carries no DPI-C, VPI or black box at all.
 VERILATOR_NETLIST_FLAGS := --timescale "1ns/1ns" --no-timing -D__VERILATOR__ -Dfunctional
 # iverilog has no --no-timing, but the specify blocks are compiled away by the
 # functional define.  __ICARUS__ is defined automatically by iverilog.

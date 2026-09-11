@@ -1,3 +1,20 @@
+// Simulation top for the Direct NPC platform.
+//
+// It instantiates the strict NPC, whose boundary is exactly
+// ysyxSoC/spec/cpu-interface.md (io_interrupt plus a full AXI4 master and a
+// full AXI4 slave), and implements a single-outstanding AXI4 memory slave so
+// the CPU can fetch instructions and access data.
+//
+// The physical memory is provided through the DPI-C functions pmem_read() and
+// pmem_write() under Verilator and through the VPI tasks $pmem_read/$pmem_write
+// under Icarus Verilog; those are the only channels between the design and the
+// C/C++ host. Retirement, DiffTest, the instruction/memory trace and trap
+// reporting come from inside NPC through its simulation-only NpcCommitDpi tap,
+// so this testbench never needs a non-standard CPU port.
+//
+// The gate-level netlist is synthesized from the same strict NPC, so it has no
+// NpcCommitDpi tap: its simulation runs under a cycle limit and is checked with
+// a waveform (X propagation), not with HIT GOOD/BAD TRAP.
 module NpcTop (
   input logic clock,
   input logic reset
@@ -5,23 +22,12 @@ module NpcTop (
 `ifdef __ICARUS__
   // Icarus Verilog does not support DPI-C.  Its simulation environment
   // supplies the physical memory through the VPI system function
-  // $pmem_read and the VPI system task $pmem_write, and it does not run
-  // DiffTest, so npc_commit is intentionally absent here.
+  // $pmem_read and the VPI system task $pmem_write.
 `else
 `ifndef SYNTHESIS
   import "DPI-C" function int pmem_read(input int raddr);
   import "DPI-C" function void pmem_write(
     input int waddr, input int wdata, input byte wmask
-  );
-  import "DPI-C" function void npc_commit(
-    input int pc, input int inst, input int dnpc,
-    input int gpr0, input int gpr1, input int gpr2, input int gpr3,
-    input int gpr4, input int gpr5, input int gpr6, input int gpr7,
-    input int gpr8, input int gpr9, input int gpr10, input int gpr11,
-    input int gpr12, input int gpr13, input int gpr14, input int gpr15,
-    input int mem_valid, input int mem_write, input int mem_addr,
-    input int mem_data, input int mem_mask, input int halt,
-    input int halt_code, input int invalid
   );
 `endif
 `endif
@@ -36,101 +42,131 @@ module NpcTop (
   `define NPC_SEQ always_ff @(posedge clock)
 `endif
 
-  logic [31:0] io_imem_addr;
-  logic [31:0] io_imem_data;
-  logic [31:0] io_dmem_addr;
-  logic [31:0] io_dmem_logical_addr;
-  logic [2:0] io_dmem_access_size;
-  logic [31:0] io_dmem_rdata;
-  logic io_dmem_read_valid;
-  logic [31:0] io_dmem_addr2;
-  logic [31:0] io_dmem_rdata2;
-  logic io_dmem_read_valid2;
-  logic io_dmem_write0_valid;
-  logic [31:0] io_dmem_write0_addr;
-  logic [31:0] io_dmem_write0_data;
-  logic [3:0] io_dmem_write0_mask;
-  logic io_dmem_write1_valid;
-  logic [31:0] io_dmem_write1_addr;
-  logic [31:0] io_dmem_write1_data;
-  logic [3:0] io_dmem_write1_mask;
-  logic io_mem_trace_valid;
-  logic io_mem_trace_write;
-  logic [31:0] io_mem_trace_addr;
-  logic [31:0] io_mem_trace_data;
-  logic [3:0] io_mem_trace_mask;
-  logic io_retire_valid;
-  logic [31:0] io_retire_pc;
-  logic [31:0] io_retire_inst;
-  logic [31:0] io_retire_dnpc;
-  logic [31:0] io_retire_gprs [0:15];
-  logic io_halt;
-  logic [31:0] io_halt_code;
-  logic io_invalid;
+  // The interrupt line is not wired to a device in the Direct platform.
+  logic io_interrupt;
+
   logic io_master_awvalid;
   logic io_master_awready;
   logic [31:0] io_master_awaddr;
+  logic [3:0] io_master_awid;
+  logic [7:0] io_master_awlen;
   logic [2:0] io_master_awsize;
+  logic [1:0] io_master_awburst;
   logic io_master_wvalid;
   logic io_master_wready;
   logic [31:0] io_master_wdata;
   logic [3:0] io_master_wstrb;
+  logic io_master_wlast;
   logic io_master_bvalid;
   logic io_master_bready;
   logic [1:0] io_master_bresp;
+  logic [3:0] io_master_bid;
   logic io_master_arvalid;
   logic io_master_arready;
   logic [31:0] io_master_araddr;
+  logic [3:0] io_master_arid;
+  logic [7:0] io_master_arlen;
   logic [2:0] io_master_arsize;
+  logic [1:0] io_master_arburst;
   logic io_master_rvalid;
   logic io_master_rready;
   logic [31:0] io_master_rdata;
   logic [1:0] io_master_rresp;
+  logic io_master_rlast;
+  logic [3:0] io_master_rid;
+
+  logic io_slave_awready;
+  logic io_slave_awvalid;
+  logic [31:0] io_slave_awaddr;
+  logic [3:0] io_slave_awid;
+  logic [7:0] io_slave_awlen;
+  logic [2:0] io_slave_awsize;
+  logic [1:0] io_slave_awburst;
+  logic io_slave_wready;
+  logic io_slave_wvalid;
+  logic [31:0] io_slave_wdata;
+  logic [3:0] io_slave_wstrb;
+  logic io_slave_wlast;
+  logic io_slave_bvalid;
+  logic io_slave_bready;
+  logic [1:0] io_slave_bresp;
+  logic [3:0] io_slave_bid;
+  logic io_slave_arready;
+  logic io_slave_arvalid;
+  logic [31:0] io_slave_araddr;
+  logic [3:0] io_slave_arid;
+  logic [7:0] io_slave_arlen;
+  logic [2:0] io_slave_arsize;
+  logic [1:0] io_slave_arburst;
+  logic io_slave_rvalid;
+  logic io_slave_rready;
+  logic [31:0] io_slave_rdata;
+  logic [1:0] io_slave_rresp;
+  logic io_slave_rlast;
+  logic [3:0] io_slave_rid;
 
   NPC core (
     .clock(clock), .reset(reset),
-    .io_imemAddr(io_imem_addr), .io_imemData(io_imem_data),
-    .io_dmemAddr(io_dmem_addr), .io_dmemRdata(io_dmem_rdata),
-    .io_dmemLogicalAddr(io_dmem_logical_addr), .io_dmemAccessSize(io_dmem_access_size),
-    .io_dmemReadValid(io_dmem_read_valid), .io_dmemAddr2(io_dmem_addr2),
-    .io_dmemRdata2(io_dmem_rdata2), .io_dmemReadValid2(io_dmem_read_valid2),
-    .io_dmemWrite0Valid(io_dmem_write0_valid), .io_dmemWrite0Addr(io_dmem_write0_addr),
-    .io_dmemWrite0Data(io_dmem_write0_data), .io_dmemWrite0Mask(io_dmem_write0_mask),
-    .io_dmemWrite1Valid(io_dmem_write1_valid), .io_dmemWrite1Addr(io_dmem_write1_addr),
-    .io_dmemWrite1Data(io_dmem_write1_data), .io_dmemWrite1Mask(io_dmem_write1_mask),
-    .io_memTraceValid(io_mem_trace_valid), .io_memTraceWrite(io_mem_trace_write),
-    .io_memTraceAddr(io_mem_trace_addr), .io_memTraceData(io_mem_trace_data),
-    .io_memTraceMask(io_mem_trace_mask), .io_retireValid(io_retire_valid),
-    .io_retirePc(io_retire_pc), .io_retireInst(io_retire_inst),
-    .io_retireDnPc(io_retire_dnpc), .io_retireGprs_0(io_retire_gprs[0]),
-    .io_retireGprs_1(io_retire_gprs[1]), .io_retireGprs_2(io_retire_gprs[2]),
-    .io_retireGprs_3(io_retire_gprs[3]), .io_retireGprs_4(io_retire_gprs[4]),
-    .io_retireGprs_5(io_retire_gprs[5]), .io_retireGprs_6(io_retire_gprs[6]),
-    .io_retireGprs_7(io_retire_gprs[7]), .io_retireGprs_8(io_retire_gprs[8]),
-    .io_retireGprs_9(io_retire_gprs[9]), .io_retireGprs_10(io_retire_gprs[10]),
-    .io_retireGprs_11(io_retire_gprs[11]), .io_retireGprs_12(io_retire_gprs[12]),
-    .io_retireGprs_13(io_retire_gprs[13]), .io_retireGprs_14(io_retire_gprs[14]),
-    .io_retireGprs_15(io_retire_gprs[15]), .io_halt(io_halt),
-    .io_haltCode(io_halt_code), .io_invalid(io_invalid),
+    .io_interrupt(io_interrupt),
     .io_master_awvalid(io_master_awvalid), .io_master_awready(io_master_awready),
-    .io_master_awaddr(io_master_awaddr), .io_master_awsize(io_master_awsize),
-    .io_master_wvalid(io_master_wvalid),
-    .io_master_wready(io_master_wready), .io_master_wdata(io_master_wdata),
-    .io_master_wstrb(io_master_wstrb), .io_master_bvalid(io_master_bvalid),
-    .io_master_bready(io_master_bready), .io_master_bresp(io_master_bresp),
+    .io_master_awaddr(io_master_awaddr), .io_master_awid(io_master_awid),
+    .io_master_awlen(io_master_awlen), .io_master_awsize(io_master_awsize),
+    .io_master_awburst(io_master_awburst),
+    .io_master_wvalid(io_master_wvalid), .io_master_wready(io_master_wready),
+    .io_master_wdata(io_master_wdata), .io_master_wstrb(io_master_wstrb),
+    .io_master_wlast(io_master_wlast),
+    .io_master_bvalid(io_master_bvalid), .io_master_bready(io_master_bready),
+    .io_master_bresp(io_master_bresp), .io_master_bid(io_master_bid),
     .io_master_arvalid(io_master_arvalid), .io_master_arready(io_master_arready),
-    .io_master_araddr(io_master_araddr), .io_master_arsize(io_master_arsize),
-    .io_master_rvalid(io_master_rvalid),
-    .io_master_rready(io_master_rready), .io_master_rdata(io_master_rdata),
-    .io_master_rresp(io_master_rresp)
+    .io_master_araddr(io_master_araddr), .io_master_arid(io_master_arid),
+    .io_master_arlen(io_master_arlen), .io_master_arsize(io_master_arsize),
+    .io_master_arburst(io_master_arburst),
+    .io_master_rvalid(io_master_rvalid), .io_master_rready(io_master_rready),
+    .io_master_rdata(io_master_rdata), .io_master_rresp(io_master_rresp),
+    .io_master_rlast(io_master_rlast), .io_master_rid(io_master_rid),
+    .io_slave_awready(io_slave_awready), .io_slave_awvalid(io_slave_awvalid),
+    .io_slave_awaddr(io_slave_awaddr), .io_slave_awid(io_slave_awid),
+    .io_slave_awlen(io_slave_awlen), .io_slave_awsize(io_slave_awsize),
+    .io_slave_awburst(io_slave_awburst),
+    .io_slave_wready(io_slave_wready), .io_slave_wvalid(io_slave_wvalid),
+    .io_slave_wdata(io_slave_wdata), .io_slave_wstrb(io_slave_wstrb),
+    .io_slave_wlast(io_slave_wlast),
+    .io_slave_bvalid(io_slave_bvalid), .io_slave_bready(io_slave_bready),
+    .io_slave_bresp(io_slave_bresp), .io_slave_bid(io_slave_bid),
+    .io_slave_arready(io_slave_arready), .io_slave_arvalid(io_slave_arvalid),
+    .io_slave_araddr(io_slave_araddr), .io_slave_arid(io_slave_arid),
+    .io_slave_arlen(io_slave_arlen), .io_slave_arsize(io_slave_arsize),
+    .io_slave_arburst(io_slave_arburst),
+    .io_slave_rvalid(io_slave_rvalid), .io_slave_rready(io_slave_rready),
+    .io_slave_rdata(io_slave_rdata), .io_slave_rresp(io_slave_rresp),
+    .io_slave_rlast(io_slave_rlast), .io_slave_rid(io_slave_rid)
   );
 
-  // The legacy direct-memory inputs are tied off.  All actual transactions
-  // use the AXI master above.
-  assign io_imem_data = 32'b0;
-  assign io_dmem_rdata = 32'b0;
-  assign io_dmem_rdata2 = 32'b0;
+  assign io_interrupt = 1'b0;
 
+  // The AXI4 slave is reserved for the ChipLink DMA engine and is unused here,
+  // so its inputs are tied off.
+  assign io_slave_awvalid = 1'b0;
+  assign io_slave_awaddr  = 32'b0;
+  assign io_slave_awid    = 4'b0;
+  assign io_slave_awlen   = 8'b0;
+  assign io_slave_awsize  = 3'b0;
+  assign io_slave_awburst = 2'b0;
+  assign io_slave_wvalid  = 1'b0;
+  assign io_slave_wdata   = 32'b0;
+  assign io_slave_wstrb   = 4'b0;
+  assign io_slave_wlast   = 1'b0;
+  assign io_slave_bready  = 1'b0;
+  assign io_slave_arvalid = 1'b0;
+  assign io_slave_araddr  = 32'b0;
+  assign io_slave_arid    = 4'b0;
+  assign io_slave_arlen   = 8'b0;
+  assign io_slave_arsize  = 3'b0;
+  assign io_slave_arburst = 2'b0;
+  assign io_slave_rready  = 1'b0;
+
+  // Single-outstanding AXI4 memory slave.  Every transaction is one beat with
+  // ID 0, so the burst attributes coming from the CPU are unused.
   logic [31:0] read_data_reg;
   logic read_valid_reg;
   logic [31:0] write_addr_reg;
@@ -146,10 +182,13 @@ module NpcTop (
   assign io_master_rvalid = read_valid_reg;
   assign io_master_rdata = read_data_reg;
   assign io_master_rresp = 2'b00;
+  assign io_master_rlast = 1'b1;
+  assign io_master_rid   = 4'b0;
   assign io_master_awready = !write_addr_valid && !write_resp_valid;
   assign io_master_wready = !write_data_valid && !write_resp_valid;
   assign io_master_bvalid = write_resp_valid;
   assign io_master_bresp = write_resp_reg;
+  assign io_master_bid   = 4'b0;
 
   `NPC_SEQ begin
     if (reset) begin
@@ -233,36 +272,6 @@ module NpcTop (
       if (write_resp_valid && io_master_bready) begin
         write_resp_valid <= 1'b0;
       end
-    end
-  end
-
-  `NPC_SEQ begin
-    if (!reset && io_retire_valid) begin
-`ifdef __ICARUS__
-      if (io_halt) begin
-        if (io_invalid || io_halt_code != 32'd0) begin
-          $display("HIT BAD TRAP at pc=0x%08x, inst=0x%08x, code=%0d",
-                   io_retire_pc, io_retire_inst, io_halt_code);
-          $fatal(1, "NPC stopped on a bad trap");
-        end else begin
-          $display("HIT GOOD TRAP at pc=0x%08x", io_retire_pc);
-          $finish;
-        end
-      end
-`else
-`ifndef SYNTHESIS
-      npc_commit(
-        io_retire_pc, io_retire_inst, io_retire_dnpc,
-        io_retire_gprs[0], io_retire_gprs[1], io_retire_gprs[2], io_retire_gprs[3],
-        io_retire_gprs[4], io_retire_gprs[5], io_retire_gprs[6], io_retire_gprs[7],
-        io_retire_gprs[8], io_retire_gprs[9], io_retire_gprs[10], io_retire_gprs[11],
-        io_retire_gprs[12], io_retire_gprs[13], io_retire_gprs[14], io_retire_gprs[15],
-        int'(io_mem_trace_valid), int'(io_mem_trace_write), io_mem_trace_addr,
-        io_mem_trace_data, int'(io_mem_trace_mask), int'(io_halt), io_halt_code,
-        int'(io_invalid)
-      );
-`endif
-`endif
     end
   end
 

@@ -49,23 +49,27 @@ config NPC_NETLIST
 	default n
 	help
 	  Replace the Chisel-generated NPC RTL with the gate-level netlist that
-	  ECC produced with yosys. The netlist, the ICsprout55 standard cell
-	  behavioral models and NpcTop.sv (which provides the memory) are
-	  compiled together with the selected simulator. This checks that the
-	  synthesized circuit behaves like the RTL, in particular that the RTL
-	  does not contain code that synthesizes differently.
-	  With Verilator this is a two-value functional check; with Icarus
-	  Verilog the four-value netlist simulation also exposes X propagation
-	  coming out of the standard cell models.
+	  ECC produced with yosys. The netlist is the strict NPC module, so it
+	  has exactly the ysyxSoC/spec/cpu-interface.md ports and contains no
+	  DPI-C, VPI or other non-synthesizable code. The netlist, the
+	  ICsprout55 standard cell behavioral models and NpcTop.sv (which
+	  provides the memory through DPI-C/VPI) are compiled together with the
+	  selected simulator.
+	  The simulation-only NpcCommitDpi tap is not part of the netlist, so
+	  DiffTest, text traces and HIT GOOD/BAD TRAP are not available here.
+	  Run the netlist under a cycle limit and inspect the waveform: with
+	  Verilator this is a two-value functional check; with Icarus Verilog
+	  the four-value simulation also exposes X propagation coming out of the
+	  standard cell models.
 
 config NPC_NETLIST_FILE
 	string "Gate-level netlist (*_Synthesis_sim.v.gz)"
 	depends on NPC_NETLIST
 	default "../ecc/npc/runs/netlist-sim/Synthesis_yosys/output/npc_Synthesis_sim.v.gz"
 	help
-	  The simulation-oriented netlist produced by ECC. Its top module keeps
-	  the same ports as the RTL NPC module. The file is gunzipped into the
-	  build directory before the simulator runs.
+	  The simulation-oriented netlist produced by ECC. Its top module is the
+	  strict NPC module, so it keeps exactly the RTL NPC ports. The file is
+	  gunzipped into the build directory before the simulator runs.
 
 config NPC_PDK_ROOT
 	string "ICsprout55 PDK root"

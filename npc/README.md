@@ -2,6 +2,10 @@
 
 这是一个基于 Chisel 的 RV32E NPC。它从 `0x80000000` 复位，加载裸机二进制镜像，并提供批处理运行、SDB 调试、DiffTest、指令/内存/函数追踪和 VCD 波形。RTL 可以用 Verilator（二值，DPI-C 驱动，支持 DiffTest 和 SDB）或 Icarus Verilog（四值，VPI 访存，用于检查 X 信号传播）进行仿真，两者通过 `menuconfig` 切换。
 
+`NPC` 的顶层端口严格遵循 `ysyxSoC/spec/cpu-interface.md`：`clock`、`reset`、`io_interrupt`、完整的 AXI4 master `io_master_*` 和完整的 AXI4 slave `io_slave_*`，任何情况下都没有额外的调试端口。Retire、DiffTest、trace 和 trap 信息通过 CPU 内部的仿真专用 black box `NpcCommitDpi`（Verilator 走 DPI-C，Icarus 直接打印 trap）输出，`ysyx_24100022` 就是同一模块在 ysyxSoC 中使用的名字。ECC 综合的门级网表顶层也是同一个严格 `NPC`：`NpcCommitDpi` 不可综合、会在综合时被优化掉，所以网表里既没有额外端口，也没有任何 DPI-C/VPI 代码，详见「网表仿真」。
+
+各种配置（Direct/网表/ysyxSoC × Verilator/Icarus）的具体运行命令见 `RUN.md`。
+
 本文中的命令均假定当前目录是工作区根目录：
 
 ```bash
@@ -64,12 +68,6 @@ HIT GOOD TRAP at pc=0x80000034 after 14 instructions
 make -C npc sim
 ```
 
-运行 Chisel 单元测试：
-
-```bash
-make -C npc test
-```
-
 生成 SystemVerilog：
 
 ```bash
@@ -104,16 +102,16 @@ Verilator 是二值仿真器，未复位的触发器会得到 0 或 1 而不是�
 支持两种仿真器：
 
 - iverilog 编译时会自动定义宏 `__ICARUS__`。`vsrc/NpcTop.sv` 用 `__ICARUS__` 把对
-  DPI-C 函数 `pmem_read()`/`pmem_write()` 和 `npc_commit()` 的调用替换为 VPI 系统
-  任务/函数 `$pmem_read`/`$pmem_write`，并去掉 DPI-C 的 `import`；iverilog 环境下不实现
+  DPI-C 函数 `pmem_read()`/`pmem_write()` 的调用替换为 VPI 系统任务/函数
+  `$pmem_read`/`$pmem_write`，并去掉 DPI-C 的 `import`；iverilog 环境下不实现
   DiffTest。
 - `csrc/vpi.c` 被编译为 VPI 模块 `build/iverilog/npc_vpi.vpi`，注册 32 位系统函数
   `$pmem_read` 和系统任务 `$pmem_write`，并在仿真开始前（`cbStartOfSimulation`）把
   `+image=PATH` 指定的程序加载进 `csrc/memory.c` 的内存数组，因此复用了 Verilator 流程
   的物理内存实现。
 - `vsrc/IverilogTop.sv` 是自驱动的仿真顶层：它产生时钟和复位、可选地 dump VCD，并在
-  `NpcTop` 识别到 `ebreak` 时输出 `HIT GOOD/BAD TRAP` 后结束仿真。没有 DPI-C 时 C 宿主
-  不再参与，仿真由 iverilog 自己驱动。
+  CPU 内的 `NpcCommitDpi` 识别到 `ebreak` 时输出 `HIT GOOD/BAD TRAP` 后结束仿真。没有
+  DPI-C 时 C 宿主不再参与，仿真由 iverilog 自己驱动。
 
 使用方式：
 
@@ -160,16 +158,20 @@ RTL 仿真接受的 Verilog 不一定可综合。为了检查 NPC 中是否含�
 +--------------------------------+
 | NpcTop                         |
 |  +-------------+       +-----+ |
-|  | NPC-netlist | <---> | Mem | |   Mem 由 NpcTop.sv 通过 DPI-C 实现
+|  | NPC-netlist | <---> | Mem | |   Mem 由 NpcTop.sv 通过 DPI-C/VPI 实现
 |  +-------------+       +-----+ |
 +--------------------------------+
 ```
 
-网表仿真只针对 Direct NPC 平台，因为讲义要求单独综合 NPC，不包含 ysyxSoC。
+网表仿真只针对 Direct NPC 平台，因为讲义要求单独综合 NPC，不包含 ysyxSoC。网表顶层就是严格
+的 `NPC`，只含 `cpu-interface.md` 的端口；CPU 内部的 `NpcCommitDpi` 不可综合，会在综合时被
+优化掉，所以网表里没有任何 DPI-C/VPI 代码，也没有 `HIT GOOD/BAD TRAP`。网表仿真因此用周期
+上限加波形检查（见下面的第 3、4 节）。
 
 ### 1. 综合出网表
 
-`ECC` 工程位于 `ecc/npc/`。它默认使用 Direct NPC 的 RTL（`npc/build/rtl`），顶层是 `NPC`：
+`ECC` 工程位于 `ecc/npc/`。它默认使用 Direct NPC 的 RTL（`npc/build/rtl`），顶层就是严格的
+`NPC`（`ysyxSoC/spec/cpu-interface.md` 的端口）：
 
 ```bash
 # 确保 npc 处于 Direct 平台配置
@@ -178,9 +180,10 @@ make -C npc default_defconfig
 make -C ecc/npc netlist
 ```
 
-ECC 会同时产生两个网表：`npc_Synthesis_sim.v.gz` 面向仿真，顶层端口与 RTL 的 `NPC`
+ECC 会同时产生两个网表：`npc_Synthesis_sim.v.gz` 面向仿真，顶层就是严格 `NPC`，端口与 RTL
 完全一致，用于替换 RTL 模块；`npc_Synthesis.v.gz` 面向后端物理设计，向量端口被拆成单 bit。
-网表仿真使用前者。它是压缩文件，Verilator 无法直接读取，`npc/Makefile` 会自动 gunzip 到
+两个网表都只包含标准单元，不含 `NpcCommitDpi`，也不含任何 DPI-C/VPI 代码。网表仿真使用
+前者；它是压缩文件，Verilator 无法直接读取，`npc/Makefile` 会自动 gunzip 到
 `npc/build/netlist/npc_Synthesis_sim.v`。
 
 ### 2. 用 Verilator 编译网表（二值功能检查）
@@ -212,21 +215,20 @@ icsprout55-pdk/IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CL/verilog/ics5
 
 ### 3. 在网表上运行程序
 
+网表里没有 `NpcCommitDpi`，也就没有 `HIT GOOD/BAD TRAP`，因此网表仿真不再用 cpu-tests 的
+PASS/FAIL 判定，而是设置周期上限并用波形检查行为/X 传播：
+
 ```bash
 make -C npc run \
-  IMAGE="$ROOT/am-kernels/tests/cpu-tests/build/dummy-riscv32e-npc.bin" BATCH=1
-make -C am-kernels/tests/cpu-tests ARCH=riscv32e-npc batch
-make -C am-kernels/benchmarks/microbench ARCH=riscv32e-npc mainargs=test batch
+  IMAGE="$ROOT/am-kernels/tests/cpu-tests/build/dummy-riscv32e-npc.bin" \
+  MAX_CYCLES=200000 WAVEFORM=build/netlist.vcd BATCH=1
+gtkwave npc/build/netlist.vcd
 ```
 
-在当前 RTL 上，网表的 37 个 cpu-tests 中 36 个 `PASS`（`wrong` 为预期负例），`microbench`
-的 10 个基准全部 `Passed`，且 `Scored time`/`Total time` 与 RTL 仿真完全一致，说明综合后的
-电路与 RTL 行为一致。另外检查网表可以看到它只包含上升沿 `DFFQX0P5H7R`，没有 `LAT*` 锁存器，
-满足流片前端对下降沿时钟和锁存器的要求。
-
-网表中通用寄存器堆已被打平成触发器，且网表里无法再使用 DPI-C，因此网表仿真不方便使用
-DiffTest（`netlist_defconfig` 默认关闭）；按讲义建议，应先在 RTL 仿真中用 DiffTest 把问题
-排除干净，再做网表仿真。
+运行会在达到 `MAX_CYCLES` 时以 `cycle limit reached` 结束，这是预期结果。检查要点：网表只
+包含上升沿 `DFFQX0P5H7R`，没有 `LAT*` 锁存器；波形上复位结束后功能信号不再有 X，且关键信号
+的跳变与 RTL 仿真一致。按讲义建议，应先在 RTL 仿真中用 DiffTest 把功能问题排除干净，再用
+网表确认综合前后行为一致。
 
 ### 4. 用 Icarus Verilog 做四值网表仿真
 
@@ -242,8 +244,14 @@ make -C npc run \
 ```
 
 讲义指出这一步「无需进行代码上的调整」：访存已经由 VPI 的 `$pmem_read`/`$pmem_write`
-实现，网表只替换 `NPC` 模块，`vsrc/NpcTop.sv`（`__ICARUS__` 分支）和 `vsrc/IverilogTop.sv`
-都不用改。与 Verilator 网表仿真的区别：
+实现，网表只替换 CPU 模块，`vsrc/NpcTop.sv`（`__ICARUS__` 分支）和 `vsrc/IverilogTop.sv`
+都不用改。
+
+`NPC` 的顶层端口严格遵循 `ysyxSoC/spec/cpu-interface.md`（`io_interrupt` 加完整 AXI4
+master/slave），retire、DiffTest、trace 和 trap 由 CPU 内部的仿真专用 `NpcCommitDpi` 输出。
+这个 black box 没有输出，综合会把它连同层次一起优化掉，所以综合得到的网表就是一个纯标准
+单元、只含文档端口的 `NPC`，不含任何 DPI-C/VPI 或不可综合代码；网表上也就没有 trap 输出，
+仿真按上一节的方式用周期上限加波形检查。与 Verilator 网表仿真的区别：
 
 - iverilog 只需 `-Dfunctional` 让标准单元模型走功能分支；`-D__ICARUS__` 由 iverilog 自动
   定义，`--no-timing`/`--timescale` 是 Verilator 专有选项，不需要。
@@ -251,12 +259,10 @@ make -C npc run \
   都是 `X`，复位结束后应全部变成确定值；如果某个触发器没有复位，`X` 就会一直传播并使程序
   运行失败。
 
-在当前网表上，短仿真波形的分析结果是：23205 个被 dump 的信号里，复位结束后只剩 895 个为
-`X`，且全部是 895 个 `DFFQX0P5H7R` 实例内部**未被使用的 `NOTIFIER`**（标准单元模型里给
-`specify` 时序检查用的通知寄存器，`-Dfunctional` 下不参与功能），没有任何功能信号为 `X`。
-行为上也一致：37 个 cpu-tests 中 36 个 `PASS`（`wrong` 为预期负例），`microbench` 的 10 个
-基准全部 `Passed`，`HIT GOOD TRAP at pc=0x80005738`，`$finish` 时间与 RTL 的四值仿真完全相同。
-因此综合得到的网表不存在 X 态传播问题，也不需要修改 RTL。
+在网表上做短仿真并分析波形：复位结束后功能信号不应再有 `X`。标准单元模型内部可能有未被使用
+的 `NOTIFIER` 寄存器（给 `specify` 时序检查用，`-Dfunctional` 下不参与功能）保持 `X`，那属于
+模型自身，不是功能信号；若某个功能触发器漏了复位，`X` 会沿数据通路传播并可在波形中观察到。
+只要波形上功能信号与 RTL 一致，就说明综合得到的网表没有综合前后行为差异，也不需要修改 RTL。
 
 ## DiffTest
 
@@ -342,7 +348,7 @@ AM 的 `npc.mk` 会自动生成 `.bin` 和 `.elf`，并将它们传给 `npc/Make
 - 首次执行时 Mill 需要下载尚未缓存的依赖；若出现 `repo1.maven.org` 的 DNS 或下载错误，应先检查网络和本地依赖缓存。
 - `CONFIG_NPC_FTRACE requires --elf` 表示启用了函数 trace 但没有设置 `ELF`。
 - `--diff`、`--itrace`、`--mtrace`、`--ftrace` 和 `--trace` 是已删除的旧参数，请使用 `make menuconfig`。
-- Icarus Verilog 配置下没有 SDB、DiffTest 和文本 trace：`BATCH`、`ELF` 只对 Verilator 有效，`HIT GOOD TRAP`/`HIT BAD TRAP` 由 `vsrc/NpcTop.sv` 在 `ebreak` 时直接打印，退出状态分别为 `0`/`1`。
-- `CONFIG_NPC_NETLIST` 打开时如果找不到网表，先用 `make -C ecc/npc netlist` 综合；找不到标准单元模型时检查 `CONFIG_NPC_PDK_ROOT` 是否指向 `icsprout55-pdk`。网表模式不支持 Icarus Verilog 和 ysyxSoC 平台，`make` 会直接报错。
+- Icarus Verilog 配置下没有 SDB、DiffTest 和文本 trace：`BATCH`、`ELF` 只对 Verilator 有效，`HIT GOOD TRAP`/`HIT BAD TRAP` 由 CPU 内的 `NpcCommitDpi` 在 `ebreak` 时直接打印，退出状态分别为 `0`/`1`。
+- `CONFIG_NPC_NETLIST` 打开时如果找不到网表，先用 `make -C ecc/npc netlist` 综合；找不到标准单元模型时检查 `CONFIG_NPC_PDK_ROOT` 是否指向 `icsprout55-pdk`。网表模式只支持 Direct NPC 平台（不支持 ysyxSoC），Verilator 和 Icarus 都可以；网表不含 `NpcCommitDpi`，没有 trap 输出，只能用周期上限加波形检查。
 - `make -C npc lint` 在 Verilator 配置下运行 `verilator --lint-only`，在 Icarus Verilog 配置下等价于一次成功的 iverilog 编译。
 - `q` 只表示退出 SDB，并不等价于测试通过；批处理回归应以 `HIT GOOD TRAP` 和退出状态 `0` 为准。

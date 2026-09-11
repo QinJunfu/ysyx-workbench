@@ -3,8 +3,8 @@ package npc
 import chisel3._
 import chisel3.util._
 
-/** Single-beat AXI master datapath used inside the CPU. The SoC wrapper adds the AXI4 ID, burst, length and last
-  * signals required at the chip boundary.
+/** Single-beat AXI-Lite master datapath. The NPC boundary itself uses the full Axi4MasterIO from
+  * ysyxSoC/spec/cpu-interface.md; this reduced bundle only remains for the unused AxiLiteArbiter helper.
   */
 class AxiLiteMasterIO extends Bundle {
   val awvalid = Output(Bool())
@@ -111,14 +111,23 @@ class SteppableCore(val resetPc: BigInt = BigInt("80000000", 16)) extends Module
   io.invalid     := wbu.io.retire.invalid
 }
 
-/** Top-level port: the legacy debug/retire view plus one AXI4-Lite master. */
-class NpcIO extends Rv32eCoreIO {
-  val master = new AxiLiteMasterIO
+/** Top-level port required by ysyxSoC/spec/cpu-interface.md: an interrupt input, one AXI4 master and one AXI4 slave.
+  *
+  * The fields are named exactly like that document, so the flattened port names (io_interrupt, io_master_*, io_slave_*)
+  * match it. Retirement, tracing and trap detection are deliberately not part of this boundary: the simulation-only
+  * NpcCommitDpi tap inside the module exports them through DPI-C, and gate-level synthesis removes that tap, so
+  * nothing outside the document's port list is ever exposed.
+  */
+class NpcIO extends Bundle {
+  val interrupt = Input(Bool())
+  val master    = new Axi4MasterIO
+  val slave     = new Axi4SlaveIO
 }
 
 /** Multi-cycle RV32E NPC. IFU and LSU requests are serialized by this explicit arbiter/state machine because the core
-  * can have at most one outstanding memory transaction. The external port is a conventional AXI4-Lite master; read and
-  * write responses are accepted only when their corresponding ready signal is asserted.
+  * can have at most one outstanding memory transaction. The module boundary is exactly ysyxSoC/spec/cpu-interface.md;
+  * everything else (retirement, DiffTest, the instruction/memory trace and trap detection) leaves the CPU only through
+  * the simulation-only NpcCommitDpi tap, which gate-level synthesis removes.
   */
 class NPC(
   val resetPc:            BigInt = BigInt("80000000", 16),
@@ -160,16 +169,26 @@ class NPC(
   val storeCycle   = state === sStoreExec
   core.io.step := executeCycle || loadCycle || storeCycle
 
+  // Every transaction is a single beat with ID 0, so the AXI4 length, burst and
+  // last attributes are constant. The internal controller only drives the
+  // address/data/valid/ready subset below.
   io.master.awvalid := false.B
   io.master.awaddr  := 0.U
+  io.master.awid    := 0.U
+  io.master.awlen   := 0.U
   io.master.awsize  := 2.U
+  io.master.awburst := 0.U
   io.master.wvalid  := false.B
   io.master.wdata   := 0.U
   io.master.wstrb   := 0.U
+  io.master.wlast   := true.B
   io.master.bready  := false.B
   io.master.arvalid := false.B
   io.master.araddr  := 0.U
+  io.master.arid    := 0.U
+  io.master.arlen   := 0.U
   io.master.arsize  := 2.U
+  io.master.arburst := 0.U
   io.master.rready  := false.B
 
   val loadAddress0  = if (useNarrowAddresses) {
@@ -319,35 +338,43 @@ class NPC(
     state := sFetchReq
   }
 
-  // Preserve the existing retire/DPI view for the simulator and unit users.
-  io.imemAddr        := core.io.imemAddr
-  io.dmemAddr        := core.io.dmemAddr
-  io.dmemLogicalAddr := core.io.dmemLogicalAddr
-  io.dmemAccessSize  := core.io.dmemAccessSize
-  io.dmemReadValid   := core.io.dmemReadValid
-  io.dmemAddr2       := core.io.dmemAddr2
-  io.dmemReadValid2  := core.io.dmemReadValid2
-  io.dmemWrite0Valid := core.io.dmemWrite0Valid
-  io.dmemWrite0Addr  := core.io.dmemWrite0Addr
-  io.dmemWrite0Data  := core.io.dmemWrite0Data
-  io.dmemWrite0Mask  := core.io.dmemWrite0Mask
-  io.dmemWrite1Valid := core.io.dmemWrite1Valid
-  io.dmemWrite1Addr  := core.io.dmemWrite1Addr
-  io.dmemWrite1Data  := core.io.dmemWrite1Data
-  io.dmemWrite1Mask  := core.io.dmemWrite1Mask
-  io.memTraceValid   := core.io.memTraceValid
-  io.memTraceWrite   := core.io.memTraceWrite
-  io.memTraceAddr    := core.io.memTraceAddr
-  io.memTraceData    := core.io.memTraceData
-  io.memTraceMask    := core.io.memTraceMask
-  io.retireValid     := core.io.retireValid
-  io.retirePc        := core.io.retirePc
-  io.retireInst      := core.io.retireInst
-  io.retireDnPc      := core.io.retireDnPc
-  io.retireGprs      := core.io.retireGprs
-  io.halt            := core.io.halt
-  io.haltCode        := core.io.haltCode
-  io.invalid         := core.io.invalid
+  // The AXI4 slave port is reserved for the ChipLink DMA engine; until that
+  // path exists the CPU never accepts a slave transaction.
+  io.slave.awready := false.B
+  io.slave.wready  := false.B
+  io.slave.bvalid  := false.B
+  io.slave.bresp   := 0.U
+  io.slave.bid     := 0.U
+  io.slave.arready := false.B
+  io.slave.rvalid  := false.B
+  io.slave.rresp   := 0.U
+  io.slave.rdata   := 0.U
+  io.slave.rlast   := false.B
+  io.slave.rid     := 0.U
+
+  // Interrupt delivery is not implemented yet; keep the required port alive.
+  dontTouch(io.interrupt)
+
+  // Retirement, trace and trap data leave the CPU only through this
+  // simulation-only tap, so they never appear in the standard port list.
+  // Gate-level synthesis drops the output-less black box, leaving a pure
+  // standard-cell netlist with exactly the cpu-interface.md boundary.
+  val commit = Module(new NpcCommitDpi)
+  commit.io.clock    := clock
+  commit.io.reset    := reset.asBool
+  commit.io.valid    := core.io.retireValid
+  commit.io.pc       := core.io.retirePc
+  commit.io.inst     := core.io.retireInst
+  commit.io.dnpc     := core.io.retireDnPc
+  commit.io.gprs     := Cat(core.io.retireGprs.reverse)
+  commit.io.memValid := core.io.memTraceValid
+  commit.io.memWrite := core.io.memTraceWrite
+  commit.io.memAddr  := core.io.memTraceAddr
+  commit.io.memData  := core.io.memTraceData
+  commit.io.memMask  := core.io.memTraceMask
+  commit.io.halt     := core.io.halt
+  commit.io.haltCode := core.io.haltCode
+  commit.io.invalid  := core.io.invalid
 }
 
 /** A compact explicit arbiter useful for later SoC integration. */

@@ -16,6 +16,7 @@
 !.gitignore
 !.scalafmt.conf
 !README.md
+!RUN.md
 !scripts/build-nemu-ref.sh
 !scripts/config.mk
 build/
