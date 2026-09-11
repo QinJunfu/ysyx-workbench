@@ -3,35 +3,6 @@ package npc
 import chisel3._
 import chisel3.util._
 
-/** Single-beat AXI-Lite master datapath. The NPC boundary itself uses the full Axi4MasterIO from
-  * ysyxSoC/spec/cpu-interface.md; this reduced bundle only remains for the unused AxiLiteArbiter helper.
-  */
-class AxiLiteMasterIO extends Bundle {
-  val awvalid = Output(Bool())
-  val awready = Input(Bool())
-  val awaddr  = Output(UInt(32.W))
-  val awsize  = Output(UInt(3.W))
-
-  val wvalid = Output(Bool())
-  val wready = Input(Bool())
-  val wdata  = Output(UInt(32.W))
-  val wstrb  = Output(UInt(4.W))
-
-  val bvalid = Input(Bool())
-  val bready = Output(Bool())
-  val bresp  = Input(UInt(2.W))
-
-  val arvalid = Output(Bool())
-  val arready = Input(Bool())
-  val araddr  = Output(UInt(32.W))
-  val arsize  = Output(UInt(3.W))
-
-  val rvalid = Input(Bool())
-  val rready = Output(Bool())
-  val rdata  = Input(UInt(32.W))
-  val rresp  = Input(UInt(2.W))
-}
-
 /** Steppable version used by the multi-cycle bus controller. */
 class SteppableCoreIO extends Rv32eCoreIO {
   val step = Input(Bool())
@@ -115,8 +86,8 @@ class SteppableCore(val resetPc: BigInt = BigInt("80000000", 16)) extends Module
   *
   * The fields are named exactly like that document, so the flattened port names (io_interrupt, io_master_*, io_slave_*)
   * match it. Retirement, tracing and trap detection are deliberately not part of this boundary: the simulation-only
-  * NpcCommitDpi tap inside the module exports them through DPI-C, and gate-level synthesis removes that tap, so
-  * nothing outside the document's port list is ever exposed.
+  * NpcCommitDpi tap inside the module exports them through DPI-C, and gate-level synthesis removes that tap, so nothing
+  * outside the document's port list is ever exposed.
   */
 class NpcIO extends Bundle {
   val interrupt = Input(Bool())
@@ -375,111 +346,4 @@ class NPC(
   commit.io.halt     := core.io.halt
   commit.io.haltCode := core.io.haltCode
   commit.io.invalid  := core.io.invalid
-}
-
-/** A compact explicit arbiter useful for later SoC integration. */
-class AxiLiteArbiter extends Module {
-  val io = IO(new Bundle {
-    val ifu = Flipped(new AxiLiteMasterIO)
-    val lsu = Flipped(new AxiLiteMasterIO)
-    val out = new AxiLiteMasterIO
-  })
-
-  val ownerIfu = 0.U(1.W)
-  val ownerLsu = 1.U(1.W)
-  val owner    = RegInit(ownerIfu)
-  val busy     = RegInit(false.B)
-
-  io.out.awvalid := false.B
-  io.out.awaddr  := 0.U
-  io.out.awsize  := 0.U
-  io.out.wvalid  := false.B
-  io.out.wdata   := 0.U
-  io.out.wstrb   := 0.U
-  io.out.bready  := false.B
-  io.out.arvalid := false.B
-  io.out.araddr  := 0.U
-  io.out.arsize  := 0.U
-  io.out.rready  := false.B
-  io.ifu.awready := false.B
-  io.ifu.wready  := false.B
-  io.ifu.bvalid  := false.B
-  io.ifu.bresp   := 0.U
-  io.ifu.arready := false.B
-  io.ifu.rvalid  := false.B
-  io.ifu.rdata   := 0.U
-  io.ifu.rresp   := 0.U
-  io.lsu.awready := false.B
-  io.lsu.wready  := false.B
-  io.lsu.bvalid  := false.B
-  io.lsu.bresp   := 0.U
-  io.lsu.arready := false.B
-  io.lsu.rvalid  := false.B
-  io.lsu.rdata   := 0.U
-  io.lsu.rresp   := 0.U
-
-  when(!busy) {
-    when(io.ifu.arvalid || io.ifu.awvalid || io.ifu.wvalid) {
-      owner := ownerIfu
-      busy  := true.B
-    }.elsewhen(io.lsu.arvalid || io.lsu.awvalid || io.lsu.wvalid) {
-      owner := ownerLsu
-      busy  := true.B
-    }
-  }.otherwise {
-    when(
-      owner === ownerIfu &&
-        ((io.out.rvalid && io.out.rready) || (io.out.bvalid && io.out.bready))
-    ) {
-      busy := false.B
-    }
-    when(
-      owner === ownerLsu &&
-        ((io.out.rvalid && io.out.rready) || (io.out.bvalid && io.out.bready))
-    ) {
-      busy := false.B
-    }
-  }
-
-  when(owner === ownerIfu) {
-    io.out.awvalid := io.ifu.awvalid && busy
-    io.out.awaddr  := io.ifu.awaddr
-    io.out.awsize  := io.ifu.awsize
-    io.out.wvalid  := io.ifu.wvalid && busy
-    io.out.wdata   := io.ifu.wdata
-    io.out.wstrb   := io.ifu.wstrb
-    io.out.bready  := io.ifu.bready
-    io.out.arvalid := io.ifu.arvalid && busy
-    io.out.araddr  := io.ifu.araddr
-    io.out.arsize  := io.ifu.arsize
-    io.out.rready  := io.ifu.rready
-    io.ifu.awready := io.out.awready && busy
-    io.ifu.wready  := io.out.wready && busy
-    io.ifu.bvalid  := io.out.bvalid
-    io.ifu.bresp   := io.out.bresp
-    io.ifu.arready := io.out.arready && busy
-    io.ifu.rvalid  := io.out.rvalid
-    io.ifu.rdata   := io.out.rdata
-    io.ifu.rresp   := io.out.rresp
-  }.otherwise {
-    io.out.awvalid := io.lsu.awvalid && busy
-    io.out.awaddr  := io.lsu.awaddr
-    io.out.awsize  := io.lsu.awsize
-    io.out.wvalid  := io.lsu.wvalid && busy
-    io.out.wdata   := io.lsu.wdata
-    io.out.wstrb   := io.lsu.wstrb
-    io.out.bready  := io.lsu.bready
-    io.out.arvalid := io.lsu.arvalid && busy
-    io.out.araddr  := io.lsu.araddr
-    io.out.arsize  := io.lsu.arsize
-    io.out.rready  := io.lsu.rready
-    io.lsu.awready := io.out.awready && busy
-    io.lsu.wready  := io.out.wready && busy
-    io.lsu.bvalid  := io.out.bvalid
-    io.lsu.bresp   := io.out.bresp
-    io.lsu.arready := io.out.arready && busy
-    io.lsu.rvalid  := io.out.rvalid
-    io.lsu.rdata   := io.out.rdata
-    io.lsu.rresp   := io.out.rresp
-  }
 }

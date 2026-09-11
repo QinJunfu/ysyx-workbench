@@ -5,8 +5,8 @@ import chisel3.util._
 
 /** Complete 32-bit AXI4 master interface required by ysyxSoC/spec/cpu-interface.md.
   *
-  * The field order and names match that document exactly, because the flattened port names are part of the CPU
-  * contract with the SoC.
+  * The field order and names match that document exactly, because the flattened port names are part of the CPU contract
+  * with the SoC.
   */
 class Axi4MasterIO extends Bundle {
   val awready = Input(Bool())
@@ -85,6 +85,8 @@ class Axi4SlaveIO extends Bundle {
 }
 
 /** Simulation-only retirement callback.
+  *
+  * It carries no bus traffic: the CPU's only memory interface is the AXI4 master above.
   *
   * The CPU boundary is fixed by ysyxSoC/spec/cpu-interface.md, so instrumentation such as DiffTest, the instruction
   * trace, the memory trace and trap detection can no longer be top-level ports. This black box taps the internal
