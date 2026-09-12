@@ -161,6 +161,9 @@ make -C npc default_defconfig
 make -C npc default_defconfig
 make -C ecc/npc netlist
 
+# 仿真策略 
+YOSYS_SYNTH_STRATEGY="AREA 6" make -C ecc/npc netlist NETLIST_RUN=area6
+
 # 2) 用网表替换 RTL 重新构建
 make -C npc netlist_defconfig
 make -C npc sim
