@@ -82,21 +82,37 @@ class SteppableCore(val resetPc: BigInt = BigInt("80000000", 16)) extends Module
   io.invalid     := wbu.io.retire.invalid
 }
 
-/** Top-level port required by ysyxSoC/spec/cpu-interface.md: an interrupt input, one AXI4 master and one AXI4 slave.
-  *
-  * The fields are named exactly like that document, so the flattened port names (io_interrupt, io_master_*, io_slave_*)
-  * match it. Retirement, tracing and trap detection are deliberately not part of this boundary: the simulation-only
-  * NpcCommitDpi tap inside the module exports them through DPI-C, and gate-level synthesis removes that tap, so nothing
-  * outside the document's port list is ever exposed.
+/** BC-stage SRAM macro interface with 11-bit addresses and 32-bit data. */
+class ysyxSramBundleInternal extends Bundle {
+  val A    = Output(UInt(11.W))
+  val D    = Output(UInt(32.W))
+  val CEB  = Output(Bool())
+  val GWEB = Output(Bool())
+  val Q    = Input(UInt(32.W))
+}
+
+/** BC-stage SRAM macro interface with 8-bit addresses and 16-bit data. */
+class ysyxSramBundleInternal2 extends Bundle {
+  val A    = Output(UInt(8.W))
+  val D    = Output(UInt(16.W))
+  val CEB  = Output(Bool())
+  val GWEB = Output(Bool())
+  val Q    = Input(UInt(16.W))
+}
+
+/** SoC interface: interrupt, AXI4 master/slave, and the reserved BC-stage SRAM ports.
+  * Retirement and trap reporting use the internal simulation-only NpcCommitDpi tap.
   */
 class NpcIO extends Bundle {
-  val interrupt = Input(Bool())
-  val master    = new Axi4MasterIO
-  val slave     = new Axi4SlaveIO
+  val interrupt   = Input(Bool())
+  val master      = new Axi4MasterIO
+  val slave       = new Axi4SlaveIO
+  val sramBundle  = Vec(2, new ysyxSramBundleInternal)
+  val sram2Bundle = Vec(2, new ysyxSramBundleInternal2)
 }
 
 /** Multi-cycle RV32E NPC. IFU and LSU requests are serialized by this explicit arbiter/state machine because the core
-  * can have at most one outstanding memory transaction. The module boundary is exactly ysyxSoC/spec/cpu-interface.md;
+  * can have at most one outstanding memory transaction. The SoC boundary also exposes the reserved BC-stage SRAM ports;
   * everything else (retirement, DiffTest, the instruction/memory trace and trap detection) leaves the CPU only through
   * the simulation-only NpcCommitDpi tap, which gate-level synthesis removes.
   */
@@ -105,6 +121,22 @@ class NPC(
   val useNarrowAddresses: Boolean = false)
     extends Module {
   val io = IO(new NpcIO)
+  dontTouch(io)
+
+  // SRAM macro ports are required by the BC-stage slot contract but are not
+  // used by this NPC implementation. Keep them electrically inactive.
+  for (port <- io.sramBundle) {
+    port.A    := 0.U
+    port.D    := 0.U
+    port.CEB  := true.B
+    port.GWEB := true.B
+  }
+  for (port <- io.sram2Bundle) {
+    port.A    := 0.U
+    port.D    := 0.U
+    port.CEB  := true.B
+    port.GWEB := true.B
+  }
 
   val core      = Module(new SteppableCore(resetPc))
   val imemData  = RegInit(0.U(32.W))

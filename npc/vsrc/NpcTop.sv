@@ -45,6 +45,32 @@ module NpcTop (
   // The interrupt line is not wired to a device in the Direct platform.
   logic io_interrupt;
 
+  logic [10:0] io_sramBundle_0_A;
+  logic [31:0] io_sramBundle_0_D;
+  logic io_sramBundle_0_CEB;
+  logic io_sramBundle_0_GWEB;
+  logic [31:0] io_sramBundle_0_Q;
+  logic [10:0] io_sramBundle_1_A;
+  logic [31:0] io_sramBundle_1_D;
+  logic io_sramBundle_1_CEB;
+  logic io_sramBundle_1_GWEB;
+  logic [31:0] io_sramBundle_1_Q;
+  logic [7:0] io_sram2Bundle_0_A;
+  logic [15:0] io_sram2Bundle_0_D;
+  logic io_sram2Bundle_0_CEB;
+  logic io_sram2Bundle_0_GWEB;
+  logic [15:0] io_sram2Bundle_0_Q;
+  logic [7:0] io_sram2Bundle_1_A;
+  logic [15:0] io_sram2Bundle_1_D;
+  logic io_sram2Bundle_1_CEB;
+  logic io_sram2Bundle_1_GWEB;
+  logic [15:0] io_sram2Bundle_1_Q;
+
+  assign io_sramBundle_0_Q  = 32'b0;
+  assign io_sramBundle_1_Q  = 32'b0;
+  assign io_sram2Bundle_0_Q = 16'b0;
+  assign io_sram2Bundle_1_Q = 16'b0;
+
   logic io_master_awvalid;
   logic io_master_awready;
   logic [31:0] io_master_awaddr;
@@ -109,6 +135,26 @@ module NpcTop (
   ysyx_24100022 core (
     .clock(clock), .reset(reset),
     .io_interrupt(io_interrupt),
+    .io_sramBundle_0_A(io_sramBundle_0_A),
+    .io_sramBundle_0_D(io_sramBundle_0_D),
+    .io_sramBundle_0_CEB(io_sramBundle_0_CEB),
+    .io_sramBundle_0_GWEB(io_sramBundle_0_GWEB),
+    .io_sramBundle_0_Q(io_sramBundle_0_Q),
+    .io_sramBundle_1_A(io_sramBundle_1_A),
+    .io_sramBundle_1_D(io_sramBundle_1_D),
+    .io_sramBundle_1_CEB(io_sramBundle_1_CEB),
+    .io_sramBundle_1_GWEB(io_sramBundle_1_GWEB),
+    .io_sramBundle_1_Q(io_sramBundle_1_Q),
+    .io_sram2Bundle_0_A(io_sram2Bundle_0_A),
+    .io_sram2Bundle_0_D(io_sram2Bundle_0_D),
+    .io_sram2Bundle_0_CEB(io_sram2Bundle_0_CEB),
+    .io_sram2Bundle_0_GWEB(io_sram2Bundle_0_GWEB),
+    .io_sram2Bundle_0_Q(io_sram2Bundle_0_Q),
+    .io_sram2Bundle_1_A(io_sram2Bundle_1_A),
+    .io_sram2Bundle_1_D(io_sram2Bundle_1_D),
+    .io_sram2Bundle_1_CEB(io_sram2Bundle_1_CEB),
+    .io_sram2Bundle_1_GWEB(io_sram2Bundle_1_GWEB),
+    .io_sram2Bundle_1_Q(io_sram2Bundle_1_Q),
     .io_master_awvalid(io_master_awvalid), .io_master_awready(io_master_awready),
     .io_master_awaddr(io_master_awaddr), .io_master_awid(io_master_awid),
     .io_master_awlen(io_master_awlen), .io_master_awsize(io_master_awsize),

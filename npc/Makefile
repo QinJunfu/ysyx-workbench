@@ -3,7 +3,9 @@ BUILD_DIR := build
 NEMU_HOME ?= $(abspath ../nemu)
 YSYXSOC_HOME ?= $(abspath ../ysyxSoC)
 NVBOARD_HOME ?= $(abspath ../nvboard)
-MILL ?= /usr/bin/mill
+# Resolve Mill through PATH by default; callers may still override with
+# `make MILL=/path/to/mill ...`.
+MILL ?= mill
 VERILATOR ?= verilator
 IVERILOG ?= iverilog
 VVP ?= vvp
